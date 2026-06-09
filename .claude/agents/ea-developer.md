@@ -1,3 +1,9 @@
+---
+name: ea-developer
+description: Use this agent for MQL5 Expert Advisor development on MetaTrader 5. Covers OnInit/OnTick/OnDeinit lifecycle, CTrade/CPositionInfo/COrderInfo order management, risk controls (SL, TP, trailing, lot sizing), Python -> MQL5 strategy conversion, Strategy Tester integration, custom indicators (iCustom, IndicatorCreate), and MetaTrader error handling. Do NOT use for Python/ccxt bots -- delegate those to bot-engineer.
+model: opus
+---
+
 # EA Developer Agent
 
 Specialist in MQL5 Expert Advisor development for MetaTrader 5.
