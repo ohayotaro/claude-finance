@@ -25,15 +25,18 @@ from src.risk.aggregator import (
     NullVenueClient,
     StrategyLogStatus,
     VenueAccountSnapshot,
+    VenueClientLoadError,
     VenueOrder,
     VenuePosition,
     compute_group_metrics,
     determine_signals,
     load_aggregator_config,
     load_group_strategies,
+    load_venue_client,
     publish_state,
     read_strategy_log_delta,
     reconcile_once,
+    resolve_venue_client_spec,
     run_forever,
     state_to_dict,
 )
@@ -472,3 +475,70 @@ def test_null_venue_client_protocol_compatible() -> None:
     assert snapshot.account_scope == "anything"
     assert client.fetch_group_positions(["x"]) == []
     assert client.fetch_open_orders(["x"]) == []
+
+
+# ---------------------------------------------------------------------------
+# Venue client injection (load_venue_client / resolve_venue_client_spec)
+# ---------------------------------------------------------------------------
+
+
+def test_load_venue_client_valid_class() -> None:
+    """Loading a valid VenueClient from a dotted-path spec succeeds."""
+    # NullVenueClient itself is a valid target for the loader.
+    spec = "src.risk.aggregator:NullVenueClient"
+    client = load_venue_client(spec)
+    # Must satisfy the protocol.
+    snapshot = client.fetch_account_snapshot("test")
+    assert snapshot.account_scope == "test"
+    assert client.fetch_group_positions([]) == []
+    assert client.fetch_open_orders([]) == []
+
+
+def test_load_venue_client_missing_module() -> None:
+    """Explicit spec with a non-existent module raises VenueClientLoadError."""
+    with pytest.raises(VenueClientLoadError, match="failed to import module"):
+        load_venue_client("totally.bogus.module:SomeClass")
+
+
+def test_load_venue_client_missing_class() -> None:
+    """Explicit spec where the module exists but the class does not."""
+    with pytest.raises(VenueClientLoadError, match="not found in module"):
+        load_venue_client("src.risk.aggregator:NonExistentClassName")
+
+
+def test_load_venue_client_class_not_protocol_compliant() -> None:
+    """Explicit spec where the class lacks required VenueClient methods."""
+    # int() has none of the protocol methods.
+    with pytest.raises(VenueClientLoadError, match="does not satisfy VenueClient protocol"):
+        load_venue_client("builtins:int")
+
+
+def test_load_venue_client_bad_spec_format() -> None:
+    """Spec without colon separator is rejected."""
+    with pytest.raises(VenueClientLoadError, match="must be 'module:ClassName'"):
+        load_venue_client("src.risk.aggregator.NullVenueClient")
+
+
+def test_resolve_venue_client_spec_cli_wins() -> None:
+    """CLI argument takes precedence over config."""
+    result = resolve_venue_client_spec(
+        cli_arg="cli.mod:Cls",
+        config_block={"venue_client": "config.mod:Cls"},
+    )
+    assert result == "cli.mod:Cls"
+
+
+def test_resolve_venue_client_spec_config_fallback() -> None:
+    """Config block is used when CLI arg is None."""
+    result = resolve_venue_client_spec(
+        cli_arg=None,
+        config_block={"venue_client": "config.mod:Cls"},
+    )
+    assert result == "config.mod:Cls"
+
+
+def test_resolve_venue_client_spec_none_when_unconfigured() -> None:
+    """Returns None when neither CLI nor config provides a spec."""
+    assert resolve_venue_client_spec(None, None) is None
+    assert resolve_venue_client_spec(None, {}) is None
+    assert resolve_venue_client_spec(None, {"other_key": "val"}) is None

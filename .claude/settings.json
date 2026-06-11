@@ -17,7 +17,9 @@
       "Bash(curl *)",
       "Read",
       "Glob",
-      "Grep"
+      "Grep",
+      "Bash(mkdir -p .claude/state)",
+      "Bash(touch .claude/state/*)"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -75,23 +77,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/error-to-codex.py\"",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-backtest-analysis.py\"",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-bot-execution.py\"",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/log-cli-tools.py\"",
-            "timeout": 5
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-bash-dispatcher.py\"",
+            "timeout": 10
           }
         ]
       },

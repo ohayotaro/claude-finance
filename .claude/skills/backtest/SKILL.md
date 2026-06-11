@@ -11,9 +11,29 @@ Run backtests and generate comprehensive performance reports.
 
 ## Workflow
 
+### Step 0: Validate Strategy is Registered
+
+**Required argument**: `strategy_id` (named parameter, e.g., `/backtest strategy_id=binance.swap.mean-revert.btcusdt.5m.v1`).
+
+If `strategy_id` is not provided, refuse with:
+
+```
+Error: strategy_id is required.
+Usage: /backtest strategy_id={strategy_id}
+
+Register a strategy first: /strategy-register register
+```
+
+Validation steps:
+1. Read `config/registry.toml` and confirm the `strategy_id` entry exists.
+2. If the entry does not exist, refuse with: "Strategy `{strategy_id}` not found in registry. Run `/strategy-register register` first."
+3. Extract `config_path`, `state_path`, `log_path`, `logic_version`, and other relevant fields from the registry entry.
+4. All generated artifacts in this workflow MUST be tagged with `strategy_id` and `logic_version`.
+
 ### Step 1: Strategy Identification
 - Identify target strategy in `src/strategies/`
-- Confirm parameters and data requirements
+- Load strategy parameters from the per-strategy config at `{config_path}` (resolved from registry)
+- Confirm data requirements
 - Verify data availability in `data/`
 
 ### Step 2: Backtest Configuration
@@ -75,7 +95,7 @@ Generate a multi-panel backtest chart. All panels share the same time axis for a
 
 **Implementation notes:**
 - Use matplotlib (static, publication-quality) or Plotly (interactive HTML)
-- Save to `reports/{strategy}_{date}_chart.html` (Plotly) or `.png` (matplotlib)
+- Save to `reports/strategies/{strategy_id}/chart_{timestamp}.html` (Plotly) or `chart_{timestamp}.png` (matplotlib)
 - Panels 1-4 must share x-axis for time alignment
 - Panel 5 can be a separate figure
 - If data exceeds 50,000 bars, downsample for rendering (full data kept in CSV)
@@ -109,7 +129,7 @@ codex exec "Validate backtest results:
 ```
 
 ### Step 7: Generate Report
-Save to `reports/{strategy}_{date}/`:
+Save to `reports/strategies/{strategy_id}/`:
 - `chart.html` or `chart.png` — multi-panel visualization from Step 5
 - `trades.csv` — trade-by-trade details (entry time, exit time, side, PnL, holding period)
 - `metrics.json` — summary metrics (IS, OOS, full period)
@@ -124,7 +144,7 @@ gemini -p "Analyze this backtest result chart:
 3. Entry/exit timing — are trades concentrated in specific periods?
 4. Signal behavior — do signal values show predictive pattern or noise?
 5. IS vs OOS boundary — does performance degrade after the boundary?
-Flag any signs of overfitting or data-specific artifacts." -f reports/{strategy}_{date}/chart.png
+Flag any signs of overfitting or data-specific artifacts." -f reports/strategies/{strategy_id}/chart.png
 ```
 
 ### Step 9: Risk Threshold Check

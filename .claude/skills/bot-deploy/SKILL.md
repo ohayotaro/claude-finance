@@ -30,7 +30,7 @@ Validation steps:
 3. If `state == "draft"`, refuse with: "Strategy is still in `draft` state. Complete testnet validation and run `/strategy-register transition {strategy_id} testnet` first."
 4. If `state` is `deprecated` or `retired`, refuse with: "Strategy `{strategy_id}` is `{state}`. Register a new version via `/strategy-register register`."
 5. Extract `config_path`, `state_path`, `log_path`, `risk_group`, and `account_scope` from the registry entry.
-6. Derive `strategy_id_safe` by replacing all dots in `strategy_id` with dashes (for Docker/systemd naming).
+6. Derive `strategy_id_safe_svc` by replacing all dots in `strategy_id` with dashes (for Docker/systemd naming).
 
 ### Step 1: Environment Assessment
 Ask the user:
@@ -49,10 +49,10 @@ Using the **infra-ops** subagent, create (if not already present -- the Dockerfi
 - The entrypoint accepts `STRATEGY_ID` as an environment variable
 
 ### Step 3: Docker Compose Configuration (Per-Strategy)
-Generate a per-strategy Docker Compose file at `docker/{strategy_id_safe}/docker-compose.yml`:
-- Service name: `bot-{strategy_id_safe}` (per `deployment.md` naming convention)
+Generate a per-strategy Docker Compose file at `docker/{strategy_id_safe_svc}/docker-compose.yml`:
+- Service name: `bot-{strategy_id_safe_svc}` (per `deployment.md` naming convention)
 - `STRATEGY_ID` environment variable set to `{strategy_id}`
-- Per-strategy `.env` file path: `docker/{strategy_id_safe}/.env`
+- Per-strategy `.env` file path: `docker/{strategy_id_safe_svc}/.env`
 - Volume mounts for:
   - `config/` (read-only)
   - `state/strategies/{strategy_id}/` (read-write, persistent)
@@ -65,7 +65,7 @@ Generate a per-strategy Docker Compose file at `docker/{strategy_id_safe}/docker
 Do NOT generate a single shared `docker-compose.yml` for all strategies. Each strategy has its own deployment unit.
 
 ### Step 4: Environment Setup (Per-Strategy)
-- Generate `docker/{strategy_id_safe}/.env` from a template
+- Generate `docker/{strategy_id_safe_svc}/.env` from a template
 - Configure secrets (API keys, webhook URLs) -- remind the user to fill in actual values
 - Set `STRATEGY_ID={strategy_id}`
 - Reference the per-strategy config path
@@ -87,7 +87,7 @@ Add to bot (if not already implemented by `/bot-develop`):
 ```
 
 ### Step 6: systemd Service (VPS) -- Per-Strategy
-Generate a per-strategy systemd unit file `bot-{strategy_id_safe}.service`:
+Generate a per-strategy systemd unit file `bot-{strategy_id_safe_svc}.service`:
 - `Description=Trading Bot - {strategy_id}`
 - `EnvironmentFile` pointing to the per-strategy `.env`
 - `ExecStart` referencing the per-strategy `docker-compose.yml`
@@ -133,10 +133,10 @@ touch .claude/state/live-trading-$(date +%Y-%m-%d).ack
 This is separate from the registry transition. The acknowledgment is valid for 24 hours and must be re-created daily. Without it, the `live-trading-gate.py` hook will block live commands.
 
 ### Step 10: Deploy
-1. Build image: `docker compose -f docker/{strategy_id_safe}/docker-compose.yml build`
-2. Start in detached mode: `docker compose -f docker/{strategy_id_safe}/docker-compose.yml up -d`
+1. Build image: `docker compose -f docker/{strategy_id_safe_svc}/docker-compose.yml build`
+2. Start in detached mode: `docker compose -f docker/{strategy_id_safe_svc}/docker-compose.yml up -d`
 3. Verify health: `curl localhost:{port}/health`
-4. Check logs: `docker compose -f docker/{strategy_id_safe}/docker-compose.yml logs -f`
+4. Check logs: `docker compose -f docker/{strategy_id_safe_svc}/docker-compose.yml logs -f`
 5. Verify log output at `logs/strategies/{strategy_id}/bot.jsonl`
 
 ### Step 11: Post-Deploy Verification

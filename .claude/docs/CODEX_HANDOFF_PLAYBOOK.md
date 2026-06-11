@@ -317,3 +317,51 @@ Validate an ML pipeline for a financial time-series problem.
 Output: pass / conditional pass (with required fixes) / fail.
 "
 ```
+
+## 14. Risk Report Validation
+
+Used by `/risk-report` to validate risk model calculations and assumptions. Two modes: per-strategy and aggregated (risk-group / account-scope).
+
+### Per-strategy mode
+
+```bash
+codex exec "
+Validate the risk model for a single strategy.
+
+## Strategy
+- strategy_id: {strategy_id} (logic_version {logic_version})
+- VaR (95%, 1d): {value}
+- CVaR (95%, 1d): {value}
+- Max strategy drawdown potential: {value}
+- Correlation assumptions: {matrix or summary}
+
+## Validation tasks
+1. Are the distributional assumptions reasonable for this strategy's return profile?
+2. Are tail risks adequately captured (fat tails, volatility clustering)?
+3. Is the stress test scenario set comprehensive for this market and timeframe?
+4. Are there hidden concentration risks within this strategy?
+"
+```
+
+### Aggregated mode (risk-group / account-scope)
+
+```bash
+codex exec "
+Validate the aggregated risk model across strategies.
+
+## Scope
+- Group: {risk_group or account_scope}
+- Strategies included: {list of strategy_id with state and enabled flag}
+- Aggregate VaR (95%, 1d): {value}
+- Aggregate CVaR (95%, 1d): {value}
+- Group drawdown vs high-water mark: {value}
+- Net exposure: {value}, Gross exposure: {value}
+- Margin utilization: {value} (account mode only)
+
+## Validation tasks
+1. Are cross-strategy correlations adequately modeled?
+2. Is the net exposure after cross-strategy netting reasonable?
+3. Are there hidden concentration risks across strategies (same symbol, same sector)?
+4. Do the soft/hard cap thresholds from risk-management.md align with the observed risk?
+"
+```

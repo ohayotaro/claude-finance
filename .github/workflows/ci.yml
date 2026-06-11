@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff check
+        run: uv run ruff check src/ tests/
+
+      - name: Mypy
+        run: uv run mypy src/
+
+      - name: Pytest (fast)
+        run: uv run pytest -m "not integration and not slow"
+
+  registry-audit:
+    name: Registry audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect registry.toml changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            DIFF_BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            DIFF_BASE="${{ github.event.before }}"
+          fi
+          if git diff --name-only "$DIFF_BASE" HEAD -- config/registry.toml | grep -q .; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+            echo "config/registry.toml not modified -- audit skipped"
+          fi
+
+      - uses: astral-sh/setup-uv@v6
+        if: steps.changes.outputs.touched == 'true'
+        with:
+          version: "0.7.12"
+
+      - name: Install dependencies
+        if: steps.changes.outputs.touched == 'true'
+        run: uv sync --frozen
+
+      - name: Run registry audit
+        if: steps.changes.outputs.touched == 'true'
+        run: uv run python -m src.orchestrator.registry audit

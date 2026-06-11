@@ -198,8 +198,19 @@ Defaults established:
 - Lifecycle: `draft -> testnet -> live -> deprecated -> retired` (no backward transitions); `/bot-deploy` is the only authorized live promoter
 - Risk aggregator: separate service per `risk_group`, reconciles against venue every 60s
 
-Outstanding follow-ups (not blocking, but should be picked up):
-- Reference implementation of `src/orchestrator/registry.py` and `src/risk/aggregator.py` (currently scaffold stubs from `/init-finance`)
-- CI wiring of `/strategy-register audit`
-- The `check-codex-before-write.py` hook treats the auto-memory directory (`~/.claude/projects/-Users-ohayotaro-claude-finance/memory/`) as path traversal because it sits outside `CLAUDE_PROJECT_DIR`. This blocks legitimate memory writes — needs an explicit allowlist for the memory dir.
-- `/team-review` of this batch (deferred — touched 12 files, ~700+ lines)
+Follow-up status (updated 2026-06-11): registry.py and aggregator.py turned out to be full implementations with tests (the "scaffold stubs" note was stale); the memory-dir allowlist for `check-codex-before-write.py` had already landed. CI wiring done in the 2026-06-11 batch below.
+
+### 2026-06-11 — Audit Remediation Batch
+
+Project-wide improvement audit; all high/medium findings fixed:
+- Multi-strategy contract compliance: `/backtest` (required `strategy_id`, `reports/strategies/{strategy_id}/` paths), `/incident-response` (dual scope: per-strategy `data/KILL.{strategy_id}` vs global `data/KILL`, `bot-{strategy_id_safe_svc}` services), `/team-review` (optional `strategy_id`), `/bot-deploy` (`_svc`), `/ea-generate` (`_fs`)
+- CODEX_HANDOFF_PLAYBOOK.md section 14 (risk report validation, per-strategy + aggregated) + codex-delegation.md table row
+- PostToolUse Bash hooks consolidated into `post-bash-dispatcher.py` (4 processes -> 1, per-handler failure isolation). Fixed latent bug: handlers read `tool_output` but Claude Code sends `tool_response` — the hooks had never fired on real events. Tightened error-to-codex test-failure regex (previously matched any "error" substring)
+- CI: `.github/workflows/ci.yml` (ruff/mypy/pytest + registry audit when `config/registry.toml` changes)
+- Aggregator venue client injection: `--venue-client module:Class` CLI arg > `venue_client` key in risk_groups.toml > NullVenueClient fallback; fail-closed (CRITICAL + non-zero exit) when an explicit spec fails import/protocol check
+- Seed `config/registry.toml` (generated via sanctioned `_ensure_registry()` path); `.gitkeep` for `mql5/{experts,include,indicators,presets}` and `tests/fixtures`; settings.json permissions for live-trading ack (`mkdir`/`touch .claude/state`)
+
+Operational learning: subagents cannot write under `.claude/` (protected area) — when delegating `.claude/` changes, agents return specs and the orchestrator applies them.
+
+Outstanding follow-ups:
+- `/team-review` of the 2026-05-14 multi-strategy batch AND this remediation batch (both deferred)

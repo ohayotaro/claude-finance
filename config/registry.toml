@@ -1,0 +1,8 @@
+schema_version = 1
+
+[defaults]
+state_dir = "state/strategies"
+log_dir = "logs/strategies"
+config_dir = "config/strategies"
+magic_range_start = 20000000
+magic_range_end = 89999999

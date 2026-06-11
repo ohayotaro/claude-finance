@@ -17,6 +17,7 @@ primary AND has at least one keyword match.
 Keywords are loaded from .claude/routing-keywords.json if present,
 otherwise built-in defaults are used.
 """
+from __future__ import annotations
 
 import json
 import os

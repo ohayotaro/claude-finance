@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """PostToolUse hook (Bash): Log codex and gemini CLI command usage to
 .claude/logs/cli-tools.jsonl for session tracking and analytics.
+
+Can be run standalone (reads JSON from stdin) or imported by the dispatcher
+via handle(payload).
 """
+from __future__ import annotations
 
 import json
 import os
@@ -16,24 +20,27 @@ LOG_FILE = os.path.join(
 TRACKED_COMMANDS = ["codex", "gemini"]
 
 
-def main() -> None:
-    raw = sys.stdin.read()
-    if not raw.strip():
-        sys.exit(0)
+def handle(data):
+    """Process a parsed PostToolUse payload.
 
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        sys.exit(0)
-
+    Logs CLI tool usage to JSONL file. Always returns None (no advisory output).
+    Called by the consolidated dispatcher or by main() for standalone use.
+    """
     tool_input = data.get("tool_input", {})
     command = tool_input.get("command", "")
 
     # Only log tracked CLI tool usage
-    if not any(command.startswith(cmd) or f" {cmd} " in command for cmd in TRACKED_COMMANDS):
-        sys.exit(0)
+    if not any(
+        command.startswith(cmd) or (" %s " % cmd) in command
+        for cmd in TRACKED_COMMANDS
+    ):
+        return None
 
-    tool_output = data.get("tool_output", {})
+    # Claude Code emits the tool result as "tool_response"; accept the
+    # legacy "tool_output" key as a fallback for direct invocation.
+    tool_output = data.get("tool_response") or data.get("tool_output") or {}
+    if not isinstance(tool_output, dict):
+        tool_output = {}
     stdout = tool_output.get("stdout", "")
     exit_code = tool_output.get("exit_code", None)
 
@@ -58,8 +65,23 @@ def main() -> None:
         with open(LOG_FILE, "a") as f:
             f.write(json.dumps(log_entry) + "\n")
     except OSError:
-        pass  # Don't fail the hook on logging errors
+        pass  # Do not fail the hook on logging errors
 
+    return None
+
+
+def main():
+    """Standalone entry point: read JSON from stdin, run handle(), exit."""
+    raw = sys.stdin.read()
+    if not raw.strip():
+        sys.exit(0)
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        sys.exit(0)
+
+    handle(data)
     sys.exit(0)
 
 

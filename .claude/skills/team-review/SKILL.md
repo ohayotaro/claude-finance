@@ -10,9 +10,19 @@ Comprehensive parallel code review by specialized reviewers.
 
 ## Workflow
 
+### Step 0: Strategy Context (Optional)
+
+`strategy_id` is **optional** for this skill.
+
+- **When reviewing strategy-specific code** (strategy logic, per-strategy config, bot code for a specific strategy): accept `strategy_id`, look it up in `config/registry.toml`, resolve paths from the registry entry, and tag the review report with `strategy_id` and `logic_version`.
+- **When reviewing non-strategy code** (hooks, infra, shared libraries, rules): `strategy_id` is omitted. No registry lookup is needed.
+
+If `strategy_id` is provided but not found in the registry, refuse with: "Strategy `{strategy_id}` not found in registry. Run `/strategy-register register` first."
+
 ### Step 1: Identify Review Scope
 - List changed files (via `git diff` or explicit list)
 - Categorize changes by domain
+- If `strategy_id` was provided in Step 0, scope the review to files under the strategy's registered paths
 
 ### Step 2: Launch Parallel Reviewers
 

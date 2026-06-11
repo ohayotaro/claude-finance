@@ -46,6 +46,7 @@
 | Sector rotation review | §11 Sector Rotation Logic Review |
 | Optimization result validation | §12 Optimization Result Validation |
 | ML pipeline validation | §13 ML Pipeline Validation |
+| Risk report validation | §14 Risk Report Validation |
 
 For one-off consultations that do not match any section, use `/codex-system` skill (it wraps `codex exec` with the standard invocation flags).
 

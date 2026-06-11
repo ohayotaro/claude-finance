@@ -6,12 +6,11 @@ This project is an AI-orchestrated financial trading system that coordinates thr
 
 ```
 ┌─────────────────────────────────────────────────┐
-│              Claude Code (Opus 4.6)              │
+│                   Claude Code                    │
 │              ── Orchestrator ──                  │
 │  Delegates, integrates, does NOT implement       │
 ├─────────────┬─────────────┬─────────────────────┤
 │  Subagents  │  Codex CLI  │    Gemini CLI       │
-│  (Opus)     │  (GPT-5.4)  │    (Gemini 2.5 Pro) │
 │             │             │                     │
 │ - Codebase  │ - Design    │ - Chart analysis    │
 │ - Review    │ - Debug     │ - PDF extraction    │

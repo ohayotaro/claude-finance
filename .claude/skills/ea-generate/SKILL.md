@@ -30,7 +30,7 @@ Validation steps:
 3. If the entry does not exist, refuse with: "Strategy `{strategy_id}` not found in registry. Run `/strategy-register register` first."
 4. Verify `magic_number` is present and > 0 in the registry entry. If missing or zero, refuse with: "MagicNumber not allocated for `{strategy_id}`. Re-register with `runtime = mql5` via `/strategy-register register`."
 5. Extract `magic_number`, `config_path`, and all relevant fields from the registry entry.
-6. Derive `strategy_id_safe` by replacing all dots in `strategy_id` with underscores (MQL5 filename constraint).
+6. Derive `strategy_id_safe_fs` by replacing all dots in `strategy_id` with underscores (MQL5 filename constraint).
 
 ### Step 1: Source Strategy Analysis
 - Read target Python strategy from `src/strategies/`
@@ -51,7 +51,7 @@ Using the **ea-developer** subagent, design:
 
 **Assess scope**: If the EA requires multiple include files (shared library, custom indicators, utility modules), transition to `/team-implement` with the design from Step 2 as input, assigning `ea-developer` to each MQL5 file.
 
-For single-file EAs, generate the EA at `mql5/experts/{strategy_id_safe}.mq5` (where `strategy_id_safe` is the `strategy_id` with dots replaced by underscores):
+For single-file EAs, generate the EA at `mql5/experts/{strategy_id_safe_fs}.mq5` (where `strategy_id_safe_fs` is the `strategy_id` with dots replaced by underscores):
 - Signal generation matching Python logic exactly
 - CTrade order management (market orders, pending orders)
 - Position tracking with magic number filtering
@@ -69,7 +69,7 @@ For single-file EAs, generate the EA at `mql5/experts/{strategy_id_safe}.mq5` (w
 
 ### Step 5: Generate Preset File
 
-Generate the `.set` preset file at `mql5/presets/{strategy_id_safe}.set` containing:
+Generate the `.set` preset file at `mql5/presets/{strategy_id_safe_fs}.set` containing:
 - `InpMagicNumber={magic_number}` (the value frozen in the registry)
 - All `input` parameters from the EA, with defaults matching the per-strategy config (`config/strategies/{strategy_id}.toml`)
 
@@ -96,8 +96,8 @@ Generate MetaTrader Strategy Tester config:
 After generating EA and preset files, update the registry entry with EA-specific fields via `/strategy-register`. Do NOT edit `config/registry.toml` directly from this skill.
 
 ### Step 9: Output
-- EA file: `mql5/experts/{strategy_id_safe}.mq5`
-- Preset file: `mql5/presets/{strategy_id_safe}.set` (contains MagicNumber from registry)
-- Include file (if needed): `mql5/include/{strategy_id_safe}_common.mqh`
+- EA file: `mql5/experts/{strategy_id_safe_fs}.mq5`
+- Preset file: `mql5/presets/{strategy_id_safe_fs}.set` (contains MagicNumber from registry)
+- Include file (if needed): `mql5/include/{strategy_id_safe_fs}_common.mqh`
 - Test config documentation
 - Deployment checklist (broker requirements, VPS setup, hedging vs netting account note)

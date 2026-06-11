@@ -23,10 +23,24 @@ Handle trading bot failures and emergencies.
 Determine severity and take immediate action:
 
 **P0 — Critical:**
-1. Emergency stop: close all positions, cancel pending orders
-2. Stop bot: `docker compose down` or `systemctl stop bot`
-3. Notify stakeholders immediately
-4. Proceed to root cause analysis
+
+Determine scope: **single-strategy incident** or **account-wide incident**.
+
+`strategy_id` identifies the affected strategy when scope is single-strategy. Resolve service names from the registry: `strategy_id_safe_svc` = `strategy_id` with dots replaced by dashes.
+
+**Single-strategy incident** (one strategy misbehaving, others unaffected):
+1. Per-strategy kill: `echo 1 > data/KILL.{strategy_id}` (stops only this strategy)
+2. Emergency stop for this strategy: cancel its pending orders, close its positions
+3. Stop the strategy service: `docker compose -f docker/{strategy_id_safe_svc}/docker-compose.yml down` or `systemctl stop bot-{strategy_id_safe_svc}`
+4. Notify stakeholders immediately
+5. Proceed to root cause analysis
+
+**Account-wide incident** (multiple strategies affected, account at risk):
+1. Global kill: `echo 1 > data/KILL` (stops ALL strategies)
+2. Emergency stop all: cancel all pending orders, close all positions across all strategies
+3. Stop all bot services: `systemctl stop 'bot-*'` or stop all per-strategy Docker Compose units
+4. Notify stakeholders immediately
+5. Proceed to root cause analysis
 
 **P1 — High:**
 1. Pause new entries (keep existing positions)
@@ -39,25 +53,43 @@ Determine severity and take immediate action:
 3. Fix in next maintenance window
 
 ### Step 2: Emergency Stop Procedure
+
+**Single-strategy stop** (requires `strategy_id`):
 ```bash
-# 1. Cancel all pending orders
-python -c "from src.bot.executor import emergency_stop; emergency_stop()"
+# 1. Activate per-strategy KillSwitch
+echo 1 > data/KILL.{strategy_id}
 
-# 2. Close all positions (market orders)
-python -c "from src.bot.executor import close_all_positions; close_all_positions()"
+# 2. Cancel pending orders and close positions for this strategy
+python -c "from src.bot.executor import emergency_stop; emergency_stop(strategy_id='{strategy_id}')"
 
-# 3. Stop the bot
-docker compose down
+# 3. Stop the strategy service
+docker compose -f docker/{strategy_id_safe_svc}/docker-compose.yml down
 # OR
-systemctl stop trading-bot
+systemctl stop bot-{strategy_id_safe_svc}
 
 # 4. Verify on exchange
-# Manually check exchange UI for any remaining positions
+# Check exchange UI for any remaining positions belonging to this strategy
+```
+
+**Account-wide stop** (all strategies):
+```bash
+# 1. Activate global KillSwitch (stops ALL strategies)
+echo 1 > data/KILL
+
+# 2. Cancel all pending orders and close all positions
+python -c "from src.bot.executor import emergency_stop_all; emergency_stop_all()"
+
+# 3. Stop all bot services
+systemctl stop 'bot-*'
+# OR stop each per-strategy Docker Compose unit
+
+# 4. Verify on exchange
+# Manually check exchange UI for any remaining positions across all strategies
 ```
 
 ### Step 3: Root Cause Analysis
 Gather evidence and delegate to Codex:
-1. Collect logs: `docker compose logs --tail 500 > incident.log`
+1. Collect logs: `docker compose -f docker/{strategy_id_safe_svc}/docker-compose.yml logs --tail 500 > incident.log` (or collect from all strategy services for account-wide incidents)
 2. Check exchange status page
 3. Review recent code changes: `git log --oneline -10`
 

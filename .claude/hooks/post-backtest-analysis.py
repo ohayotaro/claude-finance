@@ -2,9 +2,13 @@
 """PostToolUse hook (Bash): Detect backtest execution commands and suggest
 automatic result analysis and performance threshold checks.
 
+Can be run standalone (reads JSON from stdin) or imported by the dispatcher
+via handle(payload).
+
 Thresholds are loaded from .claude/backtest-thresholds.json if present,
 otherwise built-in defaults are used.
 """
+from __future__ import annotations
 
 import json
 import os
@@ -49,7 +53,7 @@ DEFAULT_THRESHOLDS = {
 }
 
 
-def load_thresholds() -> dict:
+def load_thresholds():
     """Load thresholds from project config, fall back to defaults."""
     config_path = os.path.join(
         os.environ.get("CLAUDE_PROJECT_DIR", "."),
@@ -64,47 +68,40 @@ def load_thresholds() -> dict:
         return DEFAULT_THRESHOLDS
 
 
-def main() -> None:
-    raw = sys.stdin.read()
-    if not raw.strip():
-        sys.exit(0)
+def handle(data):
+    """Process a parsed PostToolUse payload.
 
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        sys.exit(0)
-
+    Returns additionalContext string if backtest detected, None otherwise.
+    Called by the consolidated dispatcher or by main() for standalone use.
+    """
     tool_input = data.get("tool_input", {})
     command = tool_input.get("command", "")
 
     command_lower = command.lower()
     if not any(kw in command_lower for kw in BACKTEST_KEYWORDS):
-        sys.exit(0)
+        return None
 
-    tool_output = data.get("tool_output", {})
+    # Claude Code emits the tool result as "tool_response"; accept the
+    # legacy "tool_output" key as a fallback for direct invocation.
+    tool_output = data.get("tool_response") or data.get("tool_output") or {}
+    if not isinstance(tool_output, dict):
+        tool_output = {}
     stdout = tool_output.get("stdout", "")
     stderr = tool_output.get("stderr", "")
     exit_code = tool_output.get("exit_code", 0)
 
-    # If the backtest command failed, do NOT report completion.
+    # If the backtest command failed, report failure.
     if exit_code != 0:
-        failure_context_parts = [
-            f"BACKTEST FAILED (exit_code={exit_code}). Recommended next steps:",
+        failure_parts = [
+            "BACKTEST FAILED (exit_code=%s). Recommended next steps:" % exit_code,
             "1. Inspect stderr/traceback before any further action.",
             "2. Delegate root-cause analysis: "
-            "`codex exec --full-auto \"Debug backtest failure: {error}\"`",
+            '`codex exec --full-auto "Debug backtest failure: {error}"`',
             "3. Do NOT proceed with strategy validation until the failure is resolved.",
         ]
         if stderr:
-            failure_context_parts.append(f"\nstderr (first 500 chars):\n{stderr[:500]}")
-        result = {
-            "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
-                "additionalContext": "\n".join(failure_context_parts),
-            }
-        }
-        json.dump(result, sys.stdout)
-        return
+            failure_parts.append("\nstderr (first 500 chars):\n%s" % stderr[:500])
+        return "\n".join(failure_parts)
 
     thresholds = load_thresholds()
 
@@ -115,15 +112,15 @@ def main() -> None:
         re.search(cfg.get("pattern", ""), stdout)
         for cfg in thresholds.values()
     ):
-        sys.exit(0)
+        return None
 
-    warnings: list[str] = []
+    warnings = []
 
     for metric_name, config in thresholds.items():
         pattern = config.get("pattern", "")
         threshold = config.get("threshold", 0)
         comparison = config.get("comparison", "below")
-        message = config.get("message", f"{metric_name} threshold breached")
+        message = config.get("message", "%s threshold breached" % metric_name)
 
         match = re.search(pattern, stdout)
         if match:
@@ -136,7 +133,10 @@ def main() -> None:
                     breached = True
 
                 if breached:
-                    warnings.append(f"WARNING: {message} (actual: {value:.4f}, threshold: {threshold})")
+                    warnings.append(
+                        "WARNING: %s (actual: %.4f, threshold: %s)"
+                        % (message, value, threshold)
+                    )
             except (ValueError, IndexError):
                 pass
 
@@ -152,7 +152,23 @@ def main() -> None:
     if warnings:
         suggestions.insert(0, "\n".join(warnings))
 
-    context = "\n".join(suggestions)
+    return "\n".join(suggestions)
+
+
+def main():
+    """Standalone entry point: read JSON from stdin, run handle(), emit result."""
+    raw = sys.stdin.read()
+    if not raw.strip():
+        sys.exit(0)
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        sys.exit(0)
+
+    context = handle(data)
+    if context is None:
+        sys.exit(0)
 
     result = {
         "hookSpecificOutput": {

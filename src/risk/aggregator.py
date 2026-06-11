@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib
 import json
 import logging
 import os
@@ -106,6 +107,94 @@ class NullVenueClient:
 
     def fetch_open_orders(self, strategy_ids: Sequence[str]) -> Sequence[VenueOrder]:
         return []
+
+
+class VenueClientLoadError(Exception):
+    """Raised when an explicit venue client spec cannot be loaded or validated."""
+
+
+def load_venue_client(spec: str) -> VenueClient:
+    """Import and instantiate a VenueClient from a dotted-path spec.
+
+    Args:
+        spec: A string in ``module:ClassName`` form, e.g.
+            ``"src.risk.venues.binance:BinanceVenueClient"``.
+
+    Returns:
+        An instance of the resolved class that satisfies the ``VenueClient``
+        protocol.
+
+    Raises:
+        VenueClientLoadError: If the module cannot be imported, the class
+            cannot be found, the instance fails the ``VenueClient`` protocol
+            check, or instantiation (with no args) raises.
+
+    Note:
+        The spec is loaded from repo-controlled config (CLI arg or
+        ``risk_groups.toml``), so the arbitrary-import surface is accepted
+        by design.
+    """
+    if ":" not in spec:
+        raise VenueClientLoadError(
+            f"venue client spec must be 'module:ClassName', got: {spec!r}"
+        )
+    module_path, class_name = spec.rsplit(":", 1)
+    try:
+        module = importlib.import_module(module_path)
+    except Exception as exc:
+        raise VenueClientLoadError(
+            f"failed to import module {module_path!r}: {exc}"
+        ) from exc
+    cls = getattr(module, class_name, None)
+    if cls is None:
+        raise VenueClientLoadError(
+            f"class {class_name!r} not found in module {module_path!r}"
+        )
+    try:
+        instance = cls()
+    except Exception as exc:
+        raise VenueClientLoadError(
+            f"failed to instantiate {spec!r}: {exc}"
+        ) from exc
+    if not isinstance(instance, VenueClient):
+        missing = [
+            name
+            for name in ("fetch_account_snapshot", "fetch_group_positions", "fetch_open_orders")
+            if not callable(getattr(instance, name, None))
+        ]
+        raise VenueClientLoadError(
+            f"instance from {spec!r} does not satisfy VenueClient protocol; "
+            f"missing or non-callable: {missing}"
+        )
+    return instance
+
+
+def resolve_venue_client_spec(
+    cli_arg: str | None,
+    config_block: dict[str, Any] | None,
+) -> str | None:
+    """Determine the venue client spec from CLI arg or config.
+
+    Precedence (highest first):
+      1. ``cli_arg`` (``--venue-client`` on the command line)
+      2. ``venue_client`` key in the risk-group config block
+      3. ``None`` (fall back to ``NullVenueClient``)
+
+    Args:
+        cli_arg: Value of ``--venue-client`` CLI argument, or ``None``.
+        config_block: The raw dict for this risk-group from
+            ``risk_groups.toml``, or ``None``.
+
+    Returns:
+        The dotted-path spec string, or ``None`` if no spec was configured.
+    """
+    if cli_arg is not None:
+        return cli_arg
+    if config_block is not None:
+        val = config_block.get("venue_client")
+        if val is not None:
+            return str(val)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -509,6 +598,24 @@ def run_forever(
     return int(ExitCode.OK)
 
 
+def _load_risk_group_block(config_path: Path, risk_group: str) -> dict[str, Any]:
+    """Read the raw TOML block for a risk group.
+
+    Returns an empty dict if the file is missing or the group is absent.
+    This is a best-effort helper for extracting optional fields (like
+    ``venue_client``) that are not part of the typed ``AggregatorConfig``.
+    """
+    if not config_path.exists():
+        return {}
+    with config_path.open("rb") as fh:
+        data = tomllib.load(fh)
+    blocks = data.get("risk_groups", {})
+    if not isinstance(blocks, dict):
+        return {}
+    block = blocks.get(risk_group)
+    return block if isinstance(block, dict) else {}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="risk.aggregator")
     parser.add_argument("--risk-group", required=True)
@@ -518,6 +625,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--registry", default=None)
     parser.add_argument("--config", default=None)
+    parser.add_argument(
+        "--venue-client",
+        default=None,
+        help=(
+            "Dotted-path spec for the VenueClient implementation, e.g. "
+            "'src.risk.venues.binance:BinanceVenueClient'. "
+            "Overrides the 'venue_client' key in risk_groups.toml."
+        ),
+    )
     args = parser.parse_args(argv)
 
     project_root = Path(args.project_root).resolve()
@@ -538,6 +654,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         logger.error("config error: %s", exc)
         return int(ExitCode.INVARIANT_VIOLATION)
+
+    # Resolve and load the venue client.
+    raw_block = _load_risk_group_block(config_path, args.risk_group)
+    venue_spec = resolve_venue_client_spec(args.venue_client, raw_block)
+    client: VenueClient
+    if venue_spec is not None:
+        try:
+            client = load_venue_client(venue_spec)
+        except VenueClientLoadError as exc:
+            logger.critical(
+                "failed to load venue client from spec %r: %s -- "
+                "refusing to start (fail-closed)",
+                venue_spec,
+                exc,
+            )
+            return int(ExitCode.INVARIANT_VIOLATION)
+        logger.info("venue client loaded from spec: %s", venue_spec)
+    else:
+        client = NullVenueClient()
+        logger.warning(
+            "no venue client configured; using NullVenueClient (empty data). "
+            "Set --venue-client or 'venue_client' in risk_groups.toml for live use."
+        )
 
     # Startup-time path validation for every strategy in this risk_group.
     try:
@@ -576,11 +715,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
 
-    client: VenueClient = NullVenueClient()
-    logger.warning(
-        "no venue client wired up; using NullVenueClient (empty data). "
-        "Project must inject a real client for live use."
-    )
     return run_forever(config, registry_path, project_root, client, stop_event)
 
 
