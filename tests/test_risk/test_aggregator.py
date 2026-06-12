@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -28,9 +28,11 @@ from src.risk.aggregator import (
     VenueClientLoadError,
     VenueOrder,
     VenuePosition,
+    _checkpoint_file,
     compute_group_metrics,
     determine_signals,
     load_aggregator_config,
+    load_checkpoint,
     load_group_strategies,
     load_venue_client,
     publish_state,
@@ -38,6 +40,7 @@ from src.risk.aggregator import (
     reconcile_once,
     resolve_venue_client_spec,
     run_forever,
+    save_checkpoint,
     state_to_dict,
 )
 
@@ -130,12 +133,14 @@ def test_load_group_strategies_filters() -> None:
 # read_strategy_log_delta
 # ---------------------------------------------------------------------------
 
+_TS = "2026-05-14T00:00:00Z"
+
 
 def test_log_delta_well_formed(tmp_path: Path) -> None:
     log = tmp_path / "bot.jsonl"
     lines = [
-        {"event": "bot_started", "strategy_id": "x", "ts": "2026-05-14T00:00:00Z"},
-        {"event": "position_update", "strategy_id": "x", "unrealized_pnl": 12.5},
+        {"event": "bot_started", "strategy_id": "x", "ts": _TS},
+        {"event": "position_update", "strategy_id": "x", "ts": _TS, "unrealized_pnl": 12.5},
     ]
     log.write_text("\n".join(json.dumps(le) for le in lines) + "\n")
     status = StrategyLogStatus(strategy_id="x")
@@ -152,10 +157,10 @@ def test_log_delta_well_formed(tmp_path: Path) -> None:
 def test_log_delta_skips_malformed(tmp_path: Path) -> None:
     log = tmp_path / "bot.jsonl"
     log.write_text(
-        '{"event": "bot_started", "strategy_id": "x"}\n'
-        "this is not json\n"
-        '{"event": "order_placed"}\n'  # missing strategy_id
-        '{"event": "order_filled", "strategy_id": "x"}\n'
+        json.dumps({"event": "bot_started", "strategy_id": "x", "ts": _TS}) + "\n"
+        + "this is not json\n"
+        + '{"event": "order_placed"}\n'  # missing strategy_id + ts
+        + json.dumps({"event": "order_filled", "strategy_id": "x", "ts": _TS}) + "\n"
     )
     status = StrategyLogStatus(strategy_id="x")
     result = read_strategy_log_delta(log, status, quarantine_threshold=100)
@@ -168,8 +173,8 @@ def test_log_delta_partial_line_held_back(tmp_path: Path) -> None:
     """A line without trailing newline must be re-read on next call."""
     log = tmp_path / "bot.jsonl"
     log.write_text(
-        '{"event": "bot_started", "strategy_id": "x"}\n'
-        '{"event": "incomp'  # no newline
+        json.dumps({"event": "bot_started", "strategy_id": "x", "ts": _TS}) + "\n"
+        + '{"event": "incomp'  # no newline
     )
     status = StrategyLogStatus(strategy_id="x")
     result = read_strategy_log_delta(log, status, quarantine_threshold=100)
@@ -177,7 +182,7 @@ def test_log_delta_partial_line_held_back(tmp_path: Path) -> None:
     status.log_offset = result.new_offset
     # Now complete the partial line.
     with log.open("a") as fh:
-        fh.write('lete", "strategy_id": "x"}\n')
+        fh.write('lete", "strategy_id": "x", "ts": "2026-05-14T00:00:00Z"}\n')
     result2 = read_strategy_log_delta(log, status, quarantine_threshold=100)
     assert len(result2.events) == 1
     assert result2.events[0]["event"] == "incomplete"
@@ -209,6 +214,44 @@ def test_log_delta_quarantine_prunes_old_timestamps(tmp_path: Path) -> None:
     # Old t=0 entries are pruned; only the 30 new t=120 entries remain.
     assert len(status.malformed_timestamps) == 30
     assert not status.quarantined
+
+
+def test_log_delta_missing_ts_is_malformed(tmp_path: Path) -> None:
+    """Events missing 'ts' field are rejected as malformed (MEDIUM-E)."""
+    log = tmp_path / "bot.jsonl"
+    log.write_text(
+        # Has event + strategy_id but no ts -> malformed.
+        '{"event": "bot_started", "strategy_id": "x"}\n'
+        # Has all three -> valid.
+        + json.dumps({"event": "bot_started", "strategy_id": "x", "ts": _TS}) + "\n"
+    )
+    status = StrategyLogStatus(strategy_id="x")
+    result = read_strategy_log_delta(log, status, quarantine_threshold=100)
+    assert len(result.events) == 1
+    assert result.malformed_count == 1
+
+
+def test_log_delta_chunked_read(tmp_path: Path) -> None:
+    """Bounded reads process only up to max_bytes per cycle (MEDIUM-G)."""
+    log = tmp_path / "bot.jsonl"
+    line = json.dumps({"event": "tick", "strategy_id": "x", "ts": _TS})
+    # Each line is ~70 bytes. Write 200 lines (~14KB).
+    log.write_text("\n".join([line] * 200) + "\n")
+    status = StrategyLogStatus(strategy_id="x")
+    # Read with a small max_bytes to force chunking.
+    r1 = read_strategy_log_delta(
+        log, status, quarantine_threshold=100, max_bytes=1024,
+    )
+    status.log_offset = r1.new_offset
+    assert 0 < len(r1.events) < 200
+    # Second read picks up more.
+    r2 = read_strategy_log_delta(
+        log, status, quarantine_threshold=100, max_bytes=1024,
+    )
+    status.log_offset = r2.new_offset
+    assert len(r2.events) > 0
+    total = len(r1.events) + len(r2.events)
+    assert total < 200  # still not all -- multiple cycles needed
 
 
 # ---------------------------------------------------------------------------
@@ -273,11 +316,13 @@ def test_determine_signals_margin_emergency() -> None:
 def _snapshot(
     balance: Decimal = Decimal("10000"),
     margin_ratio: Decimal = Decimal("0"),
+    equity: Decimal | None = None,
 ) -> VenueAccountSnapshot:
+    eq = equity if equity is not None else balance
     return VenueAccountSnapshot(
         account_scope="acc",
         balance=balance,
-        equity=balance,
+        equity=eq,
         margin_used=balance * margin_ratio,
         margin_ratio=margin_ratio,
         timestamp=datetime.now(UTC),
@@ -351,6 +396,274 @@ def test_reconcile_happy_path_resets_failures(tmp_path: Path) -> None:
     assert state.consecutive_failures == 0
     assert state.fail_closed is False
     assert state.last_success_ts is not None
+
+
+# ---------------------------------------------------------------------------
+# CRITICAL-A: Daily PnL accounting
+# ---------------------------------------------------------------------------
+
+
+def test_unrealized_pnl_no_double_count(tmp_path: Path) -> None:
+    """Repeated position_update for the same (strategy, symbol) overwrites,
+    not sums. 100 then 120 -> group unrealized = 120."""
+    config = _default_config()
+    sid = "binance.swap.x.btc.5m.v1"
+    entry = _make_entry(sid)
+    log_dir = tmp_path / "logs" / "strategies" / sid
+    log_dir.mkdir(parents=True)
+    log_file = log_dir / "bot.jsonl"
+    today = datetime.now(UTC).date().isoformat()
+    lines = [
+        json.dumps({
+            "event": "position_update", "strategy_id": sid,
+            "symbol": "BTCUSDT", "unrealized_pnl": 100, "ts": f"{today}T01:00:00Z",
+        }),
+        json.dumps({
+            "event": "position_update", "strategy_id": sid,
+            "symbol": "BTCUSDT", "unrealized_pnl": 120, "ts": f"{today}T01:01:00Z",
+        }),
+    ]
+    log_file.write_text("\n".join(lines) + "\n")
+
+    # Use NullVenueClient so venue provides no positions -> log-derived unrealized used.
+    client = NullVenueClient()
+    state = AggregatorState(risk_group=config.risk_group)
+    log_statuses: dict[str, StrategyLogStatus] = {}
+    state = reconcile_once(
+        client, config, [entry], state, log_statuses, tmp_path,
+    )
+    # Unrealized is 120 (latest), not 220 (sum).
+    assert state.group_daily_pnl == Decimal("120")
+    assert state.latest_unrealized[(sid, "BTCUSDT")] == Decimal("120")
+
+
+def test_realized_pnl_accumulates_across_cycles(tmp_path: Path) -> None:
+    """Realized PnL from position_closed accumulates across cycles within a day.
+    50 in cycle 1 + 30 in cycle 2 = 80."""
+    config = _default_config()
+    sid = "binance.swap.x.btc.5m.v1"
+    entry = _make_entry(sid)
+    log_dir = tmp_path / "logs" / "strategies" / sid
+    log_dir.mkdir(parents=True)
+    log_file = log_dir / "bot.jsonl"
+    today = datetime.now(UTC).date().isoformat()
+
+    # Cycle 1: one position_closed with pnl=50.
+    log_file.write_text(
+        json.dumps({
+            "event": "position_closed", "strategy_id": sid,
+            "symbol": "BTCUSDT", "pnl": 50, "ts": f"{today}T02:00:00Z",
+        }) + "\n"
+    )
+    client = NullVenueClient()
+    state = AggregatorState(risk_group=config.risk_group)
+    log_statuses: dict[str, StrategyLogStatus] = {}
+    state = reconcile_once(client, config, [entry], state, log_statuses, tmp_path)
+    assert state.daily_realized_pnl == Decimal("50")
+
+    # Cycle 2: append another position_closed with pnl=30.
+    with log_file.open("a") as fh:
+        fh.write(
+            json.dumps({
+                "event": "position_closed", "strategy_id": sid,
+                "symbol": "BTCUSDT", "pnl": 30, "ts": f"{today}T02:05:00Z",
+            }) + "\n"
+        )
+    state = reconcile_once(client, config, [entry], state, log_statuses, tmp_path)
+    assert state.daily_realized_pnl == Decimal("80")
+    assert state.group_daily_pnl == Decimal("80")
+
+
+# ---------------------------------------------------------------------------
+# CRITICAL-C: Drawdown tracking + UTC day boundary
+# ---------------------------------------------------------------------------
+
+
+def test_utc_day_boundary_resets_and_hwm_survives(tmp_path: Path) -> None:
+    """On UTC day change: counters reset, SoD re-anchors, HWM survives."""
+    config = _default_config()
+    day1 = datetime(2026, 6, 10, 23, 0, 0, tzinfo=UTC)
+    day2 = datetime(2026, 6, 11, 1, 0, 0, tzinfo=UTC)
+
+    snap_d1 = VenueAccountSnapshot(
+        account_scope="acc", balance=Decimal("10000"), equity=Decimal("10500"),
+        margin_used=Decimal("0"), margin_ratio=Decimal("0"), timestamp=day1,
+    )
+    snap_d2 = VenueAccountSnapshot(
+        account_scope="acc", balance=Decimal("10000"), equity=Decimal("10200"),
+        margin_used=Decimal("0"), margin_ratio=Decimal("0"), timestamp=day2,
+    )
+
+    class DayClient:
+        def __init__(self) -> None:
+            self.snap = snap_d1
+
+        def fetch_account_snapshot(self, account_scope: str) -> VenueAccountSnapshot:
+            return self.snap
+
+        def fetch_group_positions(self, strategy_ids: Sequence[str]) -> Sequence[VenuePosition]:
+            return []
+
+        def fetch_open_orders(self, strategy_ids: Sequence[str]) -> Sequence[VenueOrder]:
+            return []
+
+    client = DayClient()
+    state = AggregatorState(risk_group=config.risk_group)
+    log_statuses: dict[str, StrategyLogStatus] = {}
+
+    # Simulate a position_closed on day 1 to have realized PnL.
+    state.daily_realized_pnl = Decimal("50")
+    state.current_utc_date = day1.date()
+
+    # Day 1 cycle.
+    state = reconcile_once(
+        client, config, [], state, log_statuses, tmp_path, now_utc=day1,
+    )
+    assert state.start_of_day_equity == Decimal("10500")
+    assert state.high_water_mark == Decimal("10500")
+    assert state.daily_realized_pnl == Decimal("50")
+
+    # Day 2 cycle -- day boundary.
+    client.snap = snap_d2
+    state = reconcile_once(
+        client, config, [], state, log_statuses, tmp_path, now_utc=day2,
+    )
+    assert state.current_utc_date == day2.date()
+    # Realized PnL reset.
+    assert state.daily_realized_pnl == Decimal("0")
+    # SoD equity re-anchored.
+    assert state.start_of_day_equity == Decimal("10200")
+    # HWM survives from day 1.
+    assert state.high_water_mark == Decimal("10500")
+    # Drawdown from HWM.
+    expected_hwm_dd = (Decimal("10200") - Decimal("10500")) / Decimal("10500") * 100
+    assert state.drawdown_hwm_pct == expected_hwm_dd
+
+
+def test_drawdown_published_in_state_dict() -> None:
+    """state_to_dict includes drawdown_sod_pct and drawdown_hwm_pct."""
+    config = _default_config()
+    state = AggregatorState(risk_group=config.risk_group)
+    state.last_success_ts = datetime.now(UTC)
+    state.drawdown_sod_pct = Decimal("-2.5")
+    state.drawdown_hwm_pct = Decimal("-4.0")
+    state.start_of_day_equity = Decimal("10000")
+    state.high_water_mark = Decimal("10500")
+    d = state_to_dict(state, config)
+    assert d["drawdown_sod_pct"] == "-2.5"
+    assert d["drawdown_hwm_pct"] == "-4.0"
+    assert d["start_of_day_equity"] == "10000"
+    assert d["high_water_mark"] == "10500"
+
+
+# ---------------------------------------------------------------------------
+# CRITICAL-B: Checkpoint persistence
+# ---------------------------------------------------------------------------
+
+
+def test_checkpoint_save_load_roundtrip(tmp_path: Path) -> None:
+    """Persist checkpoint, new instance loads it: offsets/HWM/daily PnL restored."""
+    ckpt_path = tmp_path / "checkpoint.json"
+
+    # Build state with meaningful values.
+    state1 = AggregatorState(risk_group="crypto-main")
+    state1.current_utc_date = date(2026, 6, 11)
+    state1.daily_realized_pnl = Decimal("123.45")
+    state1.latest_unrealized[("strat-a", "BTCUSDT")] = Decimal("50")
+    state1.latest_unrealized[("strat-b", "ETHUSDT")] = Decimal("-20")
+    state1.start_of_day_equity = Decimal("10000")
+    state1.high_water_mark = Decimal("10500")
+    state1.consecutive_failures = 2
+    state1.fail_closed = True
+
+    log_statuses1: dict[str, StrategyLogStatus] = {
+        "strat-a": StrategyLogStatus(strategy_id="strat-a", log_offset=4096),
+        "strat-b": StrategyLogStatus(strategy_id="strat-b", log_offset=8192),
+    }
+    save_checkpoint(ckpt_path, state1, log_statuses1)
+    assert ckpt_path.exists()
+
+    # Load into fresh state.
+    state2 = AggregatorState(risk_group="crypto-main")
+    log_statuses2: dict[str, StrategyLogStatus] = {}
+    loaded = load_checkpoint(ckpt_path, state2, log_statuses2)
+
+    assert loaded is True
+    assert state2.current_utc_date == date(2026, 6, 11)
+    assert state2.daily_realized_pnl == Decimal("123.45")
+    assert state2.latest_unrealized[("strat-a", "BTCUSDT")] == Decimal("50")
+    assert state2.latest_unrealized[("strat-b", "ETHUSDT")] == Decimal("-20")
+    assert state2.start_of_day_equity == Decimal("10000")
+    assert state2.high_water_mark == Decimal("10500")
+    assert state2.consecutive_failures == 2
+    assert state2.fail_closed is True
+    assert log_statuses2["strat-a"].log_offset == 4096
+    assert log_statuses2["strat-b"].log_offset == 8192
+
+
+def test_checkpoint_missing_starts_fresh(tmp_path: Path) -> None:
+    """Missing checkpoint file returns False and leaves state untouched."""
+    ckpt_path = tmp_path / "nonexistent.json"
+    state = AggregatorState(risk_group="g")
+    log_statuses: dict[str, StrategyLogStatus] = {}
+    assert load_checkpoint(ckpt_path, state, log_statuses) is False
+    assert state.daily_realized_pnl == Decimal("0")
+
+
+def test_checkpoint_corrupt_starts_fresh(tmp_path: Path) -> None:
+    """Corrupt checkpoint file returns False with a WARNING."""
+    ckpt_path = tmp_path / "checkpoint.json"
+    ckpt_path.write_text("not json at all")
+    state = AggregatorState(risk_group="g")
+    log_statuses: dict[str, StrategyLogStatus] = {}
+    assert load_checkpoint(ckpt_path, state, log_statuses) is False
+
+
+def test_restart_loads_checkpoint_no_replay(tmp_path: Path) -> None:
+    """After restart, checkpoint restores offsets so logs are not replayed."""
+    sid = "binance.swap.x.btc.5m.v1"
+    entry = _make_entry(sid)
+
+    # Set up registry.
+    doc = RegistryDocument(
+        schema_version=1, defaults=RegistryDefaults(), accounts=[],
+        strategies=[entry],
+    )
+    registry_path = tmp_path / "config" / "registry.toml"
+    atomic_replace(registry_path, dump_registry(doc))
+
+    # Set up log with one position_closed event.
+    log_dir = tmp_path / "logs" / "strategies" / sid
+    log_dir.mkdir(parents=True)
+    log_file = log_dir / "bot.jsonl"
+    today = datetime.now(UTC).date().isoformat()
+    log_file.write_text(
+        json.dumps({
+            "event": "position_closed", "strategy_id": sid,
+            "symbol": "BTCUSDT", "pnl": 100, "ts": f"{today}T03:00:00Z",
+        }) + "\n"
+    )
+
+    config = _default_config()
+    client = NullVenueClient()
+
+    # First run: 1 iteration.
+    stop = threading.Event()
+    run_forever(config, registry_path, tmp_path, client, stop, max_iterations=1)
+
+    # Verify checkpoint was saved.
+    ckpt_path = _checkpoint_file(tmp_path, config.risk_group)
+    assert ckpt_path.exists()
+    ckpt_data = json.loads(ckpt_path.read_text())
+    assert ckpt_data["daily_realized_pnl"] == "100"
+    # The log offset should be past the event.
+    assert ckpt_data["log_offsets"][sid] > 0
+
+    # Second run: 1 iteration -- should NOT re-read the same event.
+    run_forever(config, registry_path, tmp_path, client, stop, max_iterations=1)
+    ckpt_data2 = json.loads(ckpt_path.read_text())
+    # Realized PnL should still be 100, not 200 (no double-count).
+    assert ckpt_data2["daily_realized_pnl"] == "100"
 
 
 # ---------------------------------------------------------------------------
@@ -495,9 +808,9 @@ def test_load_venue_client_valid_class() -> None:
 
 
 def test_load_venue_client_missing_module() -> None:
-    """Explicit spec with a non-existent module raises VenueClientLoadError."""
+    """Spec with module in allowed prefix but non-existent raises import error."""
     with pytest.raises(VenueClientLoadError, match="failed to import module"):
-        load_venue_client("totally.bogus.module:SomeClass")
+        load_venue_client("src.risk.totally_bogus_module:SomeClass")
 
 
 def test_load_venue_client_missing_class() -> None:
@@ -507,16 +820,38 @@ def test_load_venue_client_missing_class() -> None:
 
 
 def test_load_venue_client_class_not_protocol_compliant() -> None:
-    """Explicit spec where the class lacks required VenueClient methods."""
-    # int() has none of the protocol methods.
+    """Explicit spec where the class lacks required VenueClient methods.
+
+    Uses a non-compliant class within an allowed module prefix.
+    """
     with pytest.raises(VenueClientLoadError, match="does not satisfy VenueClient protocol"):
-        load_venue_client("builtins:int")
+        load_venue_client("src.risk.aggregator:ConfigError")
 
 
 def test_load_venue_client_bad_spec_format() -> None:
     """Spec without colon separator is rejected."""
     with pytest.raises(VenueClientLoadError, match="must be 'module:ClassName'"):
         load_venue_client("src.risk.aggregator.NullVenueClient")
+
+
+def test_load_venue_client_allowlist_blocks_outside_prefix() -> None:
+    """Spec with module outside allowed prefixes is rejected (HIGH-D)."""
+    with pytest.raises(VenueClientLoadError, match="not in the allowed prefix list"):
+        load_venue_client("builtins:int")
+    with pytest.raises(VenueClientLoadError, match="not in the allowed prefix list"):
+        load_venue_client("totally.bogus.module:SomeClass")
+
+
+def test_load_venue_client_allowlist_monkeypatched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the allowlist is expanded via monkeypatch, wider imports succeed."""
+    monkeypatch.setattr(
+        "src.risk.aggregator.VENUE_CLIENT_ALLOWED_PREFIXES",
+        ("src.risk.", "builtin"),
+    )
+    # "builtins" starts with "builtin" so it passes the prefix check.
+    # int() has none of the protocol methods -> protocol error, not prefix error.
+    with pytest.raises(VenueClientLoadError, match="does not satisfy VenueClient protocol"):
+        load_venue_client("builtins:int")
 
 
 def test_resolve_venue_client_spec_cli_wins() -> None:

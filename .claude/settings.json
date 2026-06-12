@@ -17,9 +17,7 @@
       "Bash(curl *)",
       "Read",
       "Glob",
-      "Grep",
-      "Bash(mkdir -p .claude/state)",
-      "Bash(touch .claude/state/*)"
+      "Grep"
     ],
     "deny": [
       "Bash(rm -rf *)",

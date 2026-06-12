@@ -212,5 +212,8 @@ Project-wide improvement audit; all high/medium findings fixed:
 
 Operational learning: subagents cannot write under `.claude/` (protected area) — when delegating `.claude/` changes, agents return specs and the orchestrator applies them.
 
-Outstanding follow-ups:
-- `/team-review` of the 2026-05-14 multi-strategy batch AND this remediation batch (both deferred)
+### 2026-06-12 — Team Review Completed and Findings Fixed
+
+`/team-review` of both deferred batches done (4 specialist reviewers + Codex judgment: initially "No Ship", 4 Critical / 3 High). All Critical/High and most Medium findings fixed same cycle: aggregator daily-PnL accounting (latest-level unrealized, UTC-day bounding), checkpoint persistence across restarts, SoD/HWM drawdown metrics, venue-client import allowlist, registry TOML serialization via tomli_w + symbol validation, orthogonal enable/disable, hook secret scrubbing, live-trading ack `touch` permission removed (was defeating the gate). Full report: `.claude/logs/agent-teams/team-review-2026-06-11.md`. Accepted-as-is: CI fetch-depth 0, multiprocessing test unmarked.
+
+No outstanding follow-ups.

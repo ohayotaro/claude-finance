@@ -71,6 +71,17 @@ STRATEGY_ID_RE: re.Pattern[str] = re.compile(
     r"\.v[1-9][0-9]*$"
 )
 
+# Safe pattern for exchange-native symbol strings.  Allows alphanumerics plus
+# the handful of separators seen in real symbols (BTC/USDT, 7203.T, EUR-USD,
+# USD_JPY) but rejects quotes, newlines, whitespace, TOML metacharacters, etc.
+SAFE_SYMBOL_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9._/\-]+$")
+
+# States where the ``enabled`` flag can be toggled.  ``deprecated`` and
+# ``retired`` are terminal -- strategies in those states must stay disabled.
+ENABLEABLE_STATES: frozenset[StrategyState] = frozenset(
+    {StrategyState.DRAFT, StrategyState.TESTNET, StrategyState.LIVE}
+)
+
 DEFAULT_MAGIC_RANGE_START = 20_000_000
 DEFAULT_MAGIC_RANGE_END = 89_999_999
 MAX_MAGIC_SALT_ITERATIONS = 1000
@@ -487,6 +498,11 @@ def _find_entry(doc: RegistryDocument, strategy_id: str) -> StrategyEntry | None
 
 
 def cmd_register(args: argparse.Namespace, project_root: Path) -> int:
+    if not SAFE_SYMBOL_RE.match(args.symbol):
+        raise UserError(
+            f"symbol contains unsafe characters: {args.symbol!r} "
+            "(allowed: A-Za-z0-9 . _ / -)"
+        )
     symbol_canonical = canonicalize_symbol(args.symbol)
     try:
         logic_major = int(args.logic_version.split(".")[0])
@@ -616,25 +632,35 @@ def _scaffold_strategy_dirs(project_root: Path, entry: StrategyEntry) -> None:
 
 
 def _per_strategy_config_template(entry: StrategyEntry) -> str:
+    """Generate per-strategy config TOML.
+
+    All user-supplied values are serialized via ``tomli_w`` to prevent TOML
+    injection.  Static comments and placeholder sections are appended as
+    literal text because ``tomli_w`` does not support comments.
+    """
+    data: dict[str, Any] = {
+        "strategy_id": entry.id,
+        "runtime": {
+            "mode": "testnet",
+            "symbol": entry.symbol,
+            "timeframe": entry.timeframe,
+        },
+        "risk": {
+            "max_position_size": 0.01,
+            "max_daily_loss_pct": 2.0,
+            "max_drawdown_pct": 10.0,
+            "stop_loss_pct": 1.0,
+            "take_profit_pct": 2.0,
+        },
+        "params": {},
+        "notifications": {},
+    }
+    serialized = tomli_w.dumps(data)
+    # Append comment hints for the notifications section.
     return (
-        f'# {entry.id}\n'
-        f'strategy_id = "{entry.id}"\n'
-        '\n'
-        '[runtime]\n'
-        'mode = "testnet"\n'
-        f'symbol = "{entry.symbol}"\n'
-        f'timeframe = "{entry.timeframe}"\n'
-        '\n'
-        '[risk]\n'
-        'max_position_size = 0.01\n'
-        'max_daily_loss_pct = 2.0\n'
-        'max_drawdown_pct = 10.0\n'
-        'stop_loss_pct = 1.0\n'
-        'take_profit_pct = 2.0\n'
-        '\n'
-        '[params]\n'
-        '\n'
-        '[notifications]\n'
+        f"# {entry.id}\n"
+        f"{serialized}\n"
+        '# [notifications]\n'
         '# channel = "slack://#bot-alerts"\n'
         '# severity_floor = "WARNING"\n'
     )
@@ -669,9 +695,10 @@ def cmd_enable(args: argparse.Namespace, project_root: Path) -> int:
         entry = _find_entry(doc, args.strategy_id)
         if entry is None:
             raise UserError(f"unknown strategy_id: {args.strategy_id}")
-        if entry.state is not StrategyState.LIVE:
+        if entry.state not in ENABLEABLE_STATES:
             raise UserError(
-                f"enable refused: state={entry.state.value}, must be 'live'"
+                f"enable refused: state={entry.state.value} is terminal; "
+                f"allowed states: {', '.join(sorted(s.value for s in ENABLEABLE_STATES))}"
             )
         entry.enabled = True
         entry.updated_at = _now_utc()
@@ -687,6 +714,11 @@ def cmd_disable(args: argparse.Namespace, project_root: Path) -> int:
         entry = _find_entry(doc, args.strategy_id)
         if entry is None:
             raise UserError(f"unknown strategy_id: {args.strategy_id}")
+        if entry.state not in ENABLEABLE_STATES:
+            raise UserError(
+                f"disable refused: state={entry.state.value} is terminal; "
+                f"allowed states: {', '.join(sorted(s.value for s in ENABLEABLE_STATES))}"
+            )
         entry.enabled = False
         entry.updated_at = _now_utc()
         write_registry(registry_path, doc)
@@ -888,7 +920,7 @@ def build_parser() -> argparse.ArgumentParser:
         "target_state", choices=[s.value for s in StrategyState]
     )
 
-    p_enable = sub.add_parser("enable", help="Set enabled=true (requires state=live)")
+    p_enable = sub.add_parser("enable", help="Set enabled=true (draft/testnet/live)")
     p_enable.add_argument("strategy_id")
 
     p_disable = sub.add_parser("disable", help="Set enabled=false")

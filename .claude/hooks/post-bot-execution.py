@@ -29,6 +29,26 @@ BOT_ERROR_PATTERNS = [
     (r"position.*(?:stuck|orphan|inconsistent)", "Position inconsistency"),
 ]
 
+# Redact likely secrets before text enters model context. The 48-char
+# threshold on the base64-ish blob pattern avoids scrubbing 40-char git
+# SHA-1 hashes while still catching typical 64-char exchange API keys.
+_SECRET_PATTERNS = [
+    (re.compile(
+        r"(?i)\b([A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL"
+        r"|AUTH)[A-Z0-9_]*)\s*=\s*\S+"
+    ), r"\1=***"),
+    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]+=*"), "Bearer ***"),
+    (re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9]{16,}\b"), "***"),
+    (re.compile(r"\b[A-Za-z0-9+/]{48,}={0,2}\b"), "***"),
+]
+
+
+def _scrub(text):
+    """Redact secret-looking substrings from text."""
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
 
 def handle(data):
     """Process a parsed PostToolUse payload.
@@ -64,7 +84,8 @@ def handle(data):
         return None
 
     error_types = ", ".join(set(detected))
-    snippet = output[:500].strip()
+    snippet = _scrub(output[:500].strip())
+    command = _scrub(command)
 
     # Determine severity
     critical_types = {"Insufficient balance", "Position inconsistency", "API authentication error"}

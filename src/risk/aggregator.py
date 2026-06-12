@@ -24,7 +24,7 @@ import time
 import tomllib
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -41,7 +41,39 @@ from src.orchestrator.registry import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
+# ---------------------------------------------------------------------------
+# Structured JSON logging formatter (MEDIUM-F)
+# ---------------------------------------------------------------------------
+
+
+class _JsonFormatter(logging.Formatter):
+    """Emit one JSON object per line with ts, level, event, and risk_group."""
+
+    def __init__(self, risk_group: str = "") -> None:
+        super().__init__()
+        self._risk_group = risk_group
+
+    def format(self, record: logging.LogRecord) -> str:
+        obj: dict[str, Any] = {
+            "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
+            "level": record.levelname,
+            "event": record.getMessage(),
+        }
+        if self._risk_group:
+            obj["risk_group"] = self._risk_group
+        return json.dumps(obj, default=str)
+
+
 logger = logging.getLogger("aggregator")
+
+# ---------------------------------------------------------------------------
+# Venue client module allowlist (HIGH-D)
+# ---------------------------------------------------------------------------
+
+VENUE_CLIENT_ALLOWED_PREFIXES: tuple[str, ...] = ("src.risk.",)
+
+# Maximum bytes to read from a single strategy log per cycle (MEDIUM-G).
+LOG_READ_CHUNK_SIZE: int = 4 * 1024 * 1024  # 4 MB
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +148,10 @@ class VenueClientLoadError(Exception):
 def load_venue_client(spec: str) -> VenueClient:
     """Import and instantiate a VenueClient from a dotted-path spec.
 
+    The module portion of the spec is validated against
+    ``VENUE_CLIENT_ALLOWED_PREFIXES`` before any import is attempted.
+    This prevents arbitrary code execution from a malformed config.
+
     Args:
         spec: A string in ``module:ClassName`` form, e.g.
             ``"src.risk.venues.binance:BinanceVenueClient"``.
@@ -125,20 +161,27 @@ def load_venue_client(spec: str) -> VenueClient:
         protocol.
 
     Raises:
-        VenueClientLoadError: If the module cannot be imported, the class
-            cannot be found, the instance fails the ``VenueClient`` protocol
-            check, or instantiation (with no args) raises.
-
-    Note:
-        The spec is loaded from repo-controlled config (CLI arg or
-        ``risk_groups.toml``), so the arbitrary-import surface is accepted
-        by design.
+        VenueClientLoadError: If the module prefix is not in the allowlist,
+            the module cannot be imported, the class cannot be found, the
+            instance fails the ``VenueClient`` protocol check, or
+            instantiation (with no args) raises.
     """
     if ":" not in spec:
         raise VenueClientLoadError(
             f"venue client spec must be 'module:ClassName', got: {spec!r}"
         )
     module_path, class_name = spec.rsplit(":", 1)
+    if not any(module_path.startswith(prefix) for prefix in VENUE_CLIENT_ALLOWED_PREFIXES):
+        logger.critical(
+            "venue client module %r does not match allowed prefixes %r -- "
+            "refusing to import (fail-closed)",
+            module_path,
+            VENUE_CLIENT_ALLOWED_PREFIXES,
+        )
+        raise VenueClientLoadError(
+            f"module {module_path!r} is not in the allowed prefix list "
+            f"{VENUE_CLIENT_ALLOWED_PREFIXES!r}"
+        )
     try:
         module = importlib.import_module(module_path)
     except Exception as exc:
@@ -220,7 +263,17 @@ class ConfigError(Exception):
 
 
 def load_aggregator_config(path: Path, risk_group: str) -> AggregatorConfig:
-    """Read `config/risk_groups.toml`; pick the block for risk_group."""
+    """Read ``config/risk_groups.toml``; pick the block for *risk_group*.
+
+    Threshold units:
+
+    - ``soft_cap_daily_loss_pct`` / ``hard_cap_daily_loss_pct``: percentage
+      values where ``3.0`` means 3 %. The aggregator computes
+      ``-(daily_pnl / balance) * 100`` and compares against these.
+    - ``margin_emergency_threshold``: a **fraction** where ``0.95`` means
+      95 % margin usage. Compared directly against the venue snapshot's
+      ``margin_ratio`` field.
+    """
     if not path.exists():
         raise ConfigError(f"risk_groups config missing: {path}")
     with path.open("rb") as fh:
@@ -285,6 +338,21 @@ class AggregatorState:
     group_daily_pnl: Decimal = Decimal("0")
     open_position_count: int = 0
     open_order_count: int = 0
+    # -- CRITICAL-A: proper daily PnL accounting --
+    # Realized PnL accumulated from position_closed events in the current UTC day.
+    daily_realized_pnl: Decimal = Decimal("0")
+    # Latest unrealized PnL per (strategy_id, symbol) -- overwrite, not sum.
+    latest_unrealized: dict[tuple[str, str], Decimal] = field(default_factory=dict)
+    # Current UTC date for day-boundary detection.
+    current_utc_date: date | None = None
+    # -- CRITICAL-C: drawdown tracking --
+    # Start-of-day equity baseline, set on first successful cycle of each UTC day.
+    start_of_day_equity: Decimal | None = None
+    # All-time high-water mark equity, persisted across days.
+    high_water_mark: Decimal | None = None
+    # Computed drawdown percentages (published in state dict).
+    drawdown_sod_pct: Decimal = Decimal("0")
+    drawdown_hwm_pct: Decimal = Decimal("0")
 
 
 # ---------------------------------------------------------------------------
@@ -310,8 +378,14 @@ def read_strategy_log_delta(
     *,
     quarantine_threshold: int,
     now: float | None = None,
+    max_bytes: int = LOG_READ_CHUNK_SIZE,
 ) -> LogParseResult:
-    """Tail the JSONL log from `status.log_offset`, parse, skip malformed lines."""
+    """Tail the JSONL log from `status.log_offset`, parse, skip malformed lines.
+
+    At most ``max_bytes`` (default 4 MB) are read per call. If the unread
+    portion of the file is larger, the remainder will be picked up on the
+    next cycle via the returned ``new_offset``.
+    """
     if not log_path.exists():
         return LogParseResult(events=[], malformed_count=0, new_offset=status.log_offset)
     events: list[dict[str, Any]] = []
@@ -319,7 +393,7 @@ def read_strategy_log_delta(
     current_offset = status.log_offset
     with log_path.open("rb") as fh:
         fh.seek(status.log_offset)
-        remaining = fh.read()
+        remaining = fh.read(max_bytes)
     if not remaining:
         return LogParseResult(events=[], malformed_count=0, new_offset=status.log_offset)
     # Process only fully-terminated lines so a partial final write is retried later.
@@ -338,7 +412,9 @@ def read_strategy_log_delta(
             malformed += 1
             status.malformed_timestamps.append(ts_now)
             continue
-        if not isinstance(event, dict) or "event" not in event or "strategy_id" not in event:
+        if not isinstance(event, dict) or not all(
+            k in event for k in ("event", "strategy_id", "ts")
+        ):
             malformed += 1
             status.malformed_timestamps.append(ts_now)
             continue
@@ -403,6 +479,34 @@ def determine_signals(state: AggregatorState, config: AggregatorConfig) -> Aggre
 # ---------------------------------------------------------------------------
 
 
+def _parse_event_ts(event: dict[str, Any]) -> datetime | None:
+    """Best-effort parse of the ``ts`` field to a UTC datetime."""
+    raw = event.get("ts")
+    if raw is None:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+    except (ValueError, TypeError):
+        return None
+
+
+def _check_day_boundary(state: AggregatorState, today: date) -> None:
+    """Reset daily accumulators when the UTC date rolls over."""
+    if state.current_utc_date is not None and state.current_utc_date == today:
+        return
+    # Day boundary crossed (or first cycle ever).
+    state.current_utc_date = today
+    state.daily_realized_pnl = Decimal("0")
+    state.latest_unrealized = {}
+    # SoD equity baseline will be set on the first successful venue fetch
+    # of the new day (in reconcile_once, after the snapshot arrives).
+    state.start_of_day_equity = None
+    logger.info("UTC day boundary: counters reset for %s", today.isoformat())
+
+
 def reconcile_once(
     client: VenueClient,
     config: AggregatorConfig,
@@ -410,11 +514,17 @@ def reconcile_once(
     state: AggregatorState,
     log_statuses: dict[str, StrategyLogStatus],
     project_root: Path,
+    *,
+    now_utc: datetime | None = None,
 ) -> AggregatorState:
     """Venue-authoritative pull + log delta read + threshold check.
 
     Encodes failure in state. Never raises on venue errors.
     """
+    if now_utc is None:
+        now_utc = datetime.now(UTC)
+    _check_day_boundary(state, now_utc.date())
+
     strategy_ids = [s.id for s in strategies]
     try:
         snapshot = client.fetch_account_snapshot(config.account_scope)
@@ -443,9 +553,24 @@ def reconcile_once(
     state.open_position_count = count
     state.open_order_count = len(orders)
 
-    # Read per-strategy log deltas (supplemental, NOT authoritative for caps).
+    # -- CRITICAL-C: drawdown baselines --
+    equity = snapshot.equity
+    if state.start_of_day_equity is None and equity > 0:
+        state.start_of_day_equity = equity
+    if state.high_water_mark is None or equity > state.high_water_mark:
+        state.high_water_mark = equity
+    if state.start_of_day_equity and state.start_of_day_equity > 0:
+        state.drawdown_sod_pct = (
+            (equity - state.start_of_day_equity) / state.start_of_day_equity
+        ) * Decimal("100")
+    if state.high_water_mark and state.high_water_mark > 0:
+        state.drawdown_hwm_pct = (
+            (equity - state.high_water_mark) / state.high_water_mark
+        ) * Decimal("100")
+
+    # -- Read per-strategy log deltas (supplemental, NOT authoritative for caps). --
     quarantine_threshold = config.malformed_log_quarantine_per_minute
-    daily_pnl = Decimal("0")
+    today = now_utc.date()
     for s in strategies:
         if s.id not in log_statuses:
             log_statuses[s.id] = StrategyLogStatus(strategy_id=s.id)
@@ -464,15 +589,37 @@ def reconcile_once(
             full_log, status, quarantine_threshold=quarantine_threshold,
         )
         status.log_offset = result.new_offset
-        # Sum unrealized + realized pnl from position_update / position_closed events.
+        # -- CRITICAL-A: correct PnL accounting --
         for event in result.events:
+            event_ts = _parse_event_ts(event)
             if event.get("event") == "position_closed":
-                with contextlib.suppress(Exception):
-                    daily_pnl += Decimal(str(event.get("pnl", 0)))
+                # Only count realized PnL whose ts falls in the current UTC day.
+                if event_ts is not None and event_ts.date() == today:
+                    with contextlib.suppress(Exception):
+                        state.daily_realized_pnl += Decimal(str(event.get("pnl", 0)))
             elif event.get("event") == "position_update":
-                with contextlib.suppress(Exception):
-                    daily_pnl += Decimal(str(event.get("unrealized_pnl", 0)))
-    state.group_daily_pnl = daily_pnl
+                # unrealized_pnl is a LEVEL -- overwrite per (strategy, symbol).
+                sid = str(event.get("strategy_id", ""))
+                sym = str(event.get("symbol", ""))
+                if sid and sym:
+                    with contextlib.suppress(Exception):
+                        state.latest_unrealized[(sid, sym)] = Decimal(
+                            str(event.get("unrealized_pnl", 0))
+                        )
+
+    # Compute group_daily_pnl: realized (accumulated) + unrealized (latest levels).
+    # When the venue snapshot provides authoritative unrealized PnL from
+    # positions, prefer it for the group total.
+    venue_unrealized = sum(
+        (p.unrealized_pnl for p in positions), Decimal("0"),
+    )
+    if venue_unrealized != Decimal("0") or positions:
+        # Venue has position data -- use its unrealized total.
+        total_unrealized = venue_unrealized
+    else:
+        # No venue position data (NullVenueClient) -- fall back to log-derived.
+        total_unrealized = sum(state.latest_unrealized.values(), Decimal("0"))
+    state.group_daily_pnl = state.daily_realized_pnl + total_unrealized
     determine_signals(state, config)
     return state
 
@@ -504,8 +651,20 @@ def state_to_dict(state: AggregatorState, config: AggregatorConfig) -> dict[str,
         "group_net_exposure": str(state.group_net_exposure),
         "group_gross_exposure": str(state.group_gross_exposure),
         "group_daily_pnl": str(state.group_daily_pnl),
+        "daily_realized_pnl": str(state.daily_realized_pnl),
         "open_position_count": state.open_position_count,
         "open_order_count": state.open_order_count,
+        "drawdown_sod_pct": str(state.drawdown_sod_pct),
+        "drawdown_hwm_pct": str(state.drawdown_hwm_pct),
+        "start_of_day_equity": (
+            str(state.start_of_day_equity) if state.start_of_day_equity is not None else None
+        ),
+        "high_water_mark": (
+            str(state.high_water_mark) if state.high_water_mark is not None else None
+        ),
+        "current_utc_date": (
+            state.current_utc_date.isoformat() if state.current_utc_date is not None else None
+        ),
         "quarantined_strategies": sorted(state.quarantined_strategies),
         "config": {
             "soft_cap_daily_loss_pct": config.soft_cap_daily_loss_pct,
@@ -545,6 +704,134 @@ def publish_state(path: Path, state: AggregatorState, config: AggregatorConfig) 
 
 
 # ---------------------------------------------------------------------------
+# Checkpoint persistence (CRITICAL-B)
+# ---------------------------------------------------------------------------
+
+
+def _checkpoint_file(project_root: Path, risk_group: str) -> Path:
+    """Checkpoint lives next to the published state file."""
+    return project_root / "data" / "aggregator" / risk_group / "checkpoint.json"
+
+
+def save_checkpoint(
+    path: Path,
+    state: AggregatorState,
+    log_statuses: dict[str, StrategyLogStatus],
+) -> None:
+    """Atomically persist aggregator state for crash recovery.
+
+    Uses the same temp-file + os.replace pattern as ``publish_state``.
+    """
+    offsets: dict[str, int] = {
+        sid: ls.log_offset for sid, ls in log_statuses.items()
+    }
+    payload: dict[str, Any] = {
+        "current_utc_date": (
+            state.current_utc_date.isoformat()
+            if state.current_utc_date is not None else None
+        ),
+        "daily_realized_pnl": str(state.daily_realized_pnl),
+        "latest_unrealized": {
+            f"{sid}\x00{sym}": str(val)
+            for (sid, sym), val in state.latest_unrealized.items()
+        },
+        "start_of_day_equity": (
+            str(state.start_of_day_equity)
+            if state.start_of_day_equity is not None else None
+        ),
+        "high_water_mark": (
+            str(state.high_water_mark)
+            if state.high_water_mark is not None else None
+        ),
+        "consecutive_failures": state.consecutive_failures,
+        "fail_closed": state.fail_closed,
+        "log_offsets": offsets,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(payload, sort_keys=True).encode("utf-8")
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as tmp:
+        tmp_name = tmp.name
+        try:
+            tmp.write(data)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        except Exception:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(tmp_name)
+            raise
+    try:
+        os.replace(tmp_name, path)
+    except Exception:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_name)
+        raise
+
+
+def load_checkpoint(
+    path: Path,
+    state: AggregatorState,
+    log_statuses: dict[str, StrategyLogStatus],
+) -> bool:
+    """Restore aggregator state from a checkpoint file.
+
+    Returns True if a checkpoint was loaded, False if missing or corrupt
+    (a WARNING is logged on corruption; the caller starts fresh).
+    """
+    if not path.exists():
+        return False
+    try:
+        raw = json.loads(path.read_text("utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("corrupt or unreadable checkpoint, starting fresh: %s", exc)
+        return False
+    try:
+        saved_date_str = raw.get("current_utc_date")
+        if saved_date_str is not None:
+            state.current_utc_date = date.fromisoformat(saved_date_str)
+        state.daily_realized_pnl = Decimal(raw.get("daily_realized_pnl", "0"))
+        for key_str, val_str in raw.get("latest_unrealized", {}).items():
+            parts = key_str.split("\x00", 1)
+            if len(parts) == 2:
+                state.latest_unrealized[(parts[0], parts[1])] = Decimal(val_str)
+        sod = raw.get("start_of_day_equity")
+        state.start_of_day_equity = Decimal(sod) if sod is not None else None
+        hwm = raw.get("high_water_mark")
+        state.high_water_mark = Decimal(hwm) if hwm is not None else None
+        state.consecutive_failures = int(raw.get("consecutive_failures", 0))
+        state.fail_closed = bool(raw.get("fail_closed", False))
+        for sid, offset in raw.get("log_offsets", {}).items():
+            log_statuses[sid] = StrategyLogStatus(
+                strategy_id=sid, log_offset=int(offset),
+            )
+    except (ValueError, TypeError, KeyError) as exc:
+        logger.warning("checkpoint parse error, starting fresh: %s", exc)
+        # Reset any partially loaded state.
+        state.current_utc_date = None
+        state.daily_realized_pnl = Decimal("0")
+        state.latest_unrealized = {}
+        state.start_of_day_equity = None
+        state.high_water_mark = None
+        state.consecutive_failures = 0
+        state.fail_closed = False
+        log_statuses.clear()
+        return False
+    logger.info(
+        "checkpoint loaded: date=%s realized=%s hwm=%s offsets=%d",
+        state.current_utc_date,
+        state.daily_realized_pnl,
+        state.high_water_mark,
+        len(log_statuses),
+    )
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
@@ -566,6 +853,8 @@ def run_forever(
     state = AggregatorState(risk_group=config.risk_group)
     log_statuses: dict[str, StrategyLogStatus] = {}
     state_path = _state_file(project_root, config.risk_group)
+    checkpoint_path = _checkpoint_file(project_root, config.risk_group)
+    load_checkpoint(checkpoint_path, state, log_statuses)
     iterations = 0
     while True:
         if stop_event is not None and stop_event.is_set():
@@ -584,6 +873,7 @@ def run_forever(
         strategies = load_group_strategies(doc, config.risk_group)
         state = reconcile_once(client, config, strategies, state, log_statuses, project_root)
         publish_state(state_path, state, config)
+        save_checkpoint(checkpoint_path, state, log_statuses)
         iterations += 1
         elapsed = time.monotonic() - cycle_start
         sleep_for = max(0.0, config.poll_interval_s - elapsed)
@@ -595,6 +885,7 @@ def run_forever(
     # bots should not trust an aggregator that has exited).
     state.fail_closed = True
     publish_state(state_path, state, config)
+    save_checkpoint(checkpoint_path, state, log_statuses)
     return int(ExitCode.OK)
 
 
@@ -644,10 +935,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         Path(args.config) if args.config else project_root / "config" / "risk_groups.toml"
     )
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    handler = logging.StreamHandler()
+    handler.setFormatter(_JsonFormatter(risk_group=args.risk_group))
+    logging.basicConfig(level=logging.INFO, handlers=[handler])
 
     try:
         config = load_aggregator_config(config_path, args.risk_group)

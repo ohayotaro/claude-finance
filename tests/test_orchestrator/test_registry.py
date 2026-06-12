@@ -19,6 +19,8 @@ import pytest
 from src.orchestrator.registry import (
     DEFAULT_MAGIC_RANGE_END,
     DEFAULT_MAGIC_RANGE_START,
+    ENABLEABLE_STATES,
+    SAFE_SYMBOL_RE,
     STRATEGY_ID_RE,
     ExitCode,
     InvariantViolationError,
@@ -590,3 +592,224 @@ def test_audit_detects_timestamp_inversion(tmp_path: Path) -> None:
 def test_position_mode_values() -> None:
     assert PositionMode.NETTING.value == "netting"
     assert PositionMode.HEDGING.value == "hedging"
+
+
+# ---------------------------------------------------------------------------
+# SAFE_SYMBOL_RE validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        "BTCUSDT",
+        "BTC/USDT",
+        "7203.T",
+        "EUR-USD",
+        "USD_JPY",
+        "SPY",
+    ],
+)
+def test_safe_symbol_accepts_valid(symbol: str) -> None:
+    assert SAFE_SYMBOL_RE.match(symbol) is not None
+
+
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        'BTC"USDT',      # double quote
+        "BTC\nUSDT",     # newline
+        "BTC USDT",      # space
+        "BTC=USDT",      # equals (TOML metacharacter)
+        "BTC[USDT]",     # brackets
+        "",               # empty
+    ],
+)
+def test_safe_symbol_rejects_unsafe(symbol: str) -> None:
+    assert SAFE_SYMBOL_RE.match(symbol) is None
+
+
+def test_cli_register_rejects_unsafe_symbol(tmp_path: Path) -> None:
+    out = _run_cli(
+        tmp_path,
+        "register",
+        "--venue", "binance",
+        "--market", "swap",
+        "--logic-slug", "mr",
+        "--symbol", 'BTC"USDT',
+        "--timeframe", "5m",
+        "--runtime", "python",
+        "--account-scope", "binance-main",
+        "--risk-group", "crypto-main",
+    )
+    assert out.returncode == ExitCode.USER_ERROR
+    assert "unsafe characters" in out.stderr
+
+
+# ---------------------------------------------------------------------------
+# TOML-safe per-strategy config generation
+# ---------------------------------------------------------------------------
+
+
+def test_per_strategy_config_is_valid_toml(tmp_path: Path) -> None:
+    """The generated per-strategy config must be parseable TOML with correct values."""
+    import tomllib as _tomllib
+
+    _run_cli(
+        tmp_path,
+        "register",
+        "--venue", "binance",
+        "--market", "swap",
+        "--logic-slug", "mr",
+        "--symbol", "BTC/USDT",
+        "--timeframe", "5m",
+        "--runtime", "python",
+        "--account-scope", "binance-main",
+        "--risk-group", "crypto-main",
+    )
+    config_path = tmp_path / "config" / "strategies" / "binance.swap.mr.btcusdt.5m.v1.toml"
+    assert config_path.exists()
+    data = _tomllib.loads(config_path.read_text())
+    assert data["strategy_id"] == "binance.swap.mr.btcusdt.5m.v1"
+    assert data["runtime"]["symbol"] == "BTC/USDT"
+    assert data["runtime"]["timeframe"] == "5m"
+    assert data["risk"]["stop_loss_pct"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Enable/disable state matrix
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("state", "expect_enable_ok"),
+    [
+        (StrategyState.DRAFT, True),
+        (StrategyState.TESTNET, True),
+        (StrategyState.LIVE, True),
+        (StrategyState.DEPRECATED, False),
+        (StrategyState.RETIRED, False),
+    ],
+)
+def test_enable_state_matrix(
+    tmp_path: Path, state: StrategyState, expect_enable_ok: bool
+) -> None:
+    """Enable must succeed for draft/testnet/live; fail for deprecated/retired."""
+    sid = "binance.swap.mr.btcusdt.5m.v1"
+    reg_path = tmp_path / "config" / "registry.toml"
+    reg_path.parent.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC).replace(microsecond=0)
+    doc = RegistryDocument(
+        schema_version=1,
+        defaults=RegistryDefaults(),
+        accounts=[],
+        strategies=[
+            StrategyEntry(
+                id=sid, family_id="mr", logic_version="1.0.0",
+                runtime=Runtime.PYTHON, venue="binance", market="swap",
+                symbol="BTCUSDT", timeframe="5m", account_scope="binance-main",
+                risk_group="crypto-main", state=state, enabled=False,
+                config_path=f"config/strategies/{sid}.toml",
+                state_path=f"state/strategies/{sid}",
+                log_path=f"logs/strategies/{sid}",
+                created_at=now, updated_at=now,
+            ),
+        ],
+    )
+    atomic_replace(reg_path, dump_registry(doc))
+    # Scaffold dirs so audit does not complain.
+    for d in (
+        tmp_path / "config/strategies",
+        tmp_path / f"state/strategies/{sid}",
+        tmp_path / f"logs/strategies/{sid}",
+    ):
+        d.mkdir(parents=True, exist_ok=True)
+    (tmp_path / f"config/strategies/{sid}.toml").touch()
+
+    out = _run_cli(tmp_path, "enable", sid)
+    if expect_enable_ok:
+        assert out.returncode == ExitCode.OK, out.stderr
+        assert "enabled" in out.stdout
+    else:
+        assert out.returncode == ExitCode.USER_ERROR
+        assert "terminal" in out.stderr
+
+
+@pytest.mark.parametrize(
+    ("state", "expect_disable_ok"),
+    [
+        (StrategyState.DRAFT, True),
+        (StrategyState.TESTNET, True),
+        (StrategyState.LIVE, True),
+        (StrategyState.DEPRECATED, False),
+        (StrategyState.RETIRED, False),
+    ],
+)
+def test_disable_state_matrix(
+    tmp_path: Path, state: StrategyState, expect_disable_ok: bool
+) -> None:
+    """Disable must succeed for draft/testnet/live; fail for deprecated/retired."""
+    sid = "binance.swap.mr.btcusdt.5m.v1"
+    reg_path = tmp_path / "config" / "registry.toml"
+    reg_path.parent.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC).replace(microsecond=0)
+    doc = RegistryDocument(
+        schema_version=1,
+        defaults=RegistryDefaults(),
+        accounts=[],
+        strategies=[
+            StrategyEntry(
+                id=sid, family_id="mr", logic_version="1.0.0",
+                runtime=Runtime.PYTHON, venue="binance", market="swap",
+                symbol="BTCUSDT", timeframe="5m", account_scope="binance-main",
+                risk_group="crypto-main", state=state, enabled=True,
+                config_path=f"config/strategies/{sid}.toml",
+                state_path=f"state/strategies/{sid}",
+                log_path=f"logs/strategies/{sid}",
+                created_at=now, updated_at=now,
+            ),
+        ],
+    )
+    atomic_replace(reg_path, dump_registry(doc))
+    for d in (
+        tmp_path / "config/strategies",
+        tmp_path / f"state/strategies/{sid}",
+        tmp_path / f"logs/strategies/{sid}",
+    ):
+        d.mkdir(parents=True, exist_ok=True)
+    (tmp_path / f"config/strategies/{sid}.toml").touch()
+
+    out = _run_cli(tmp_path, "disable", sid)
+    if expect_disable_ok:
+        assert out.returncode == ExitCode.OK, out.stderr
+        assert "disabled" in out.stdout
+    else:
+        assert out.returncode == ExitCode.USER_ERROR
+        assert "terminal" in out.stderr
+
+
+def test_enableable_states_matches_contract() -> None:
+    """ENABLEABLE_STATES must be exactly {draft, testnet, live}."""
+    got = set(ENABLEABLE_STATES)
+    assert got == {StrategyState.DRAFT, StrategyState.TESTNET, StrategyState.LIVE}
+
+
+# ---------------------------------------------------------------------------
+# Known-value MagicNumber test (CRC32 independent verification)
+# ---------------------------------------------------------------------------
+
+
+def test_magic_number_known_value() -> None:
+    """Verify allocator produces the independently-computed CRC32 result."""
+    import zlib as _zlib
+
+    sid = "oanda.fx.ma-cross.usdjpy.1h.v1"
+    range_start = DEFAULT_MAGIC_RANGE_START
+    range_size = DEFAULT_MAGIC_RANGE_END - DEFAULT_MAGIC_RANGE_START + 1
+
+    # Independent calculation -- NOT calling the implementation's helper.
+    expected = range_start + (_zlib.crc32(sid.encode()) % range_size)
+
+    magic, salt = allocate_magic_number(sid, set())
+    assert salt == 0
+    assert magic == expected
