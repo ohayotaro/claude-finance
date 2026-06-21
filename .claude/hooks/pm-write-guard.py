@@ -15,6 +15,7 @@ ALLOWED_RELATIVE_DIRS = (
     ".claude/state",
     ".claude/docs/reviews",
 )
+ALLOWED_ROOT_FILES = ("README.md", "CLAUDE.md")
 
 
 def is_within(child: Path, parent: Path) -> bool:
@@ -42,6 +43,10 @@ def is_allowed_path(file_path: str, project_dir: Path) -> tuple[bool, str]:
     target = resolve_target(file_path, project_root)
     if not is_within(target, project_root):
         return False, f"Path traversal or outside-project write blocked: {target}"
+
+    relative_target = target.relative_to(project_root)
+    if relative_target in (Path(file_name) for file_name in ALLOWED_ROOT_FILES):
+        return True, "Allowed: PM root documentation file"
 
     for relative_dir in ALLOWED_RELATIVE_DIRS:
         allowed_root = (project_root / relative_dir).resolve()

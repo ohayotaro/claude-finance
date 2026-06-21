@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 if TYPE_CHECKING:
     from types import ModuleType
 
@@ -20,16 +22,49 @@ def load_guard() -> ModuleType:
     return module
 
 
-def test_pm_write_guard_allows_task_artifacts(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "file_path",
+    [
+        ".claude/tasks/task-1/brief.md",
+        ".claude/checkpoints/task-1.json",
+        ".claude/plans/task-1.md",
+        ".claude/state/session.json",
+        ".claude/docs/reviews/task-1.md",
+    ],
+)
+def test_pm_write_guard_allows_pm_orchestration_paths(
+    tmp_path: Path, file_path: str
+) -> None:
     guard = load_guard()
-    allowed, reason = guard.is_allowed_path(".claude/tasks/task-1/brief.md", tmp_path)
+    allowed, reason = guard.is_allowed_path(file_path, tmp_path)
     assert allowed
     assert "Allowed" in reason
 
 
-def test_pm_write_guard_blocks_source_writes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("file_name", ["README.md", "CLAUDE.md"])
+def test_pm_write_guard_allows_root_documentation_files(
+    tmp_path: Path, file_name: str
+) -> None:
     guard = load_guard()
-    allowed, reason = guard.is_allowed_path("src/strategies/example.py", tmp_path)
+    allowed, reason = guard.is_allowed_path(str(tmp_path / file_name), tmp_path)
+    assert allowed
+    assert reason == "Allowed: PM root documentation file"
+
+
+@pytest.mark.parametrize(
+    "file_path",
+    [
+        ".claude/rules/security.md",
+        "src/bot/main.py",
+        "config/strategies/example.toml",
+        "mql5/Experts/example.mq5",
+        "tests/test_example.py",
+        "docs/README.md",
+    ],
+)
+def test_pm_write_guard_blocks_disallowed_paths(tmp_path: Path, file_path: str) -> None:
+    guard = load_guard()
+    allowed, reason = guard.is_allowed_path(file_path, tmp_path)
     assert not allowed
     assert "codex_handoff.py" in reason
 
