@@ -11,13 +11,31 @@ The project is markets-agnostic: crypto, FX, futures, equities, and optional MQL
 
 ## Quick Start
 
+### New project (includes scaffold)
+
+```bash
+cd /path/to/your-trading-project
+git clone --depth 1 https://github.com/ohayotaro/claude-finance.git .starter
+cp -r .starter/.claude .starter/.codex .starter/AGENTS.md .starter/CLAUDE.md \
+      .starter/pyproject.toml .starter/uv.lock .starter/.gitignore \
+      .starter/.env.example .starter/.github \
+      .starter/src .starter/tests .starter/config .starter/docker \
+      .starter/mql5 .starter/reports .starter/scripts .
+rm -rf .starter
+git init
+uv sync --extra dev
+claude
+```
+
+### Existing project (orchestration layer only)
+
+If `pyproject.toml`, `src/`, `tests/`, etc. already exist, copy only the orchestration files:
+
 ```bash
 cd /path/to/your-trading-project
 git clone --depth 1 https://github.com/ohayotaro/claude-finance.git .starter
 cp -r .starter/.claude .starter/.codex .starter/AGENTS.md .starter/CLAUDE.md .
 rm -rf .starter
-uv sync --extra dev
-claude
 ```
 
 Inside Claude Code:
@@ -98,6 +116,8 @@ Risk tiers:
 
 ## What Gets Copied
 
+### Orchestration layer (always copied)
+
 ```text
 your-trading-project/
 ├── AGENTS.md                         # Codex project contract
@@ -113,7 +133,25 @@ your-trading-project/
 └── .codex/config.toml                # safe project Codex defaults
 ```
 
-Project code (`src/`, `mql5/`, `tests/`, `data/`, `reports/`, etc.) is left alone by the template updater.
+### Project scaffold (new projects only)
+
+```text
+your-trading-project/
+├── pyproject.toml                    # uv project with dev extras
+├── uv.lock                          # pinned dependencies
+├── .gitignore                        # data, state, logs, .env excluded
+├── .env.example                      # credential template
+├── .github/                          # CI workflow
+├── src/                              # source packages (data, strategies, bot, risk, ...)
+├── tests/                            # pytest suite with fixtures
+├── config/                           # registry.toml and strategy configs
+├── docker/                           # container templates
+├── mql5/                             # EA experts, includes, indicators, presets
+├── reports/                          # generated backtest and risk reports
+└── scripts/                          # update script and utilities
+```
+
+For existing projects that already have their own `pyproject.toml` and source layout, copy only the orchestration layer. The template updater (`scripts/update.sh`) preserves project code and only refreshes orchestration files.
 
 ## Skill Pipelines
 
