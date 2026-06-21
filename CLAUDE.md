@@ -1,120 +1,60 @@
 # Financial Trading AI Orchestrator
 
-> Claude Code (Opus 4.6, 1M context) as orchestrator, coordinating Codex CLI and Gemini CLI as specialized agents for a financial trading AI team.
+Claude is the user-facing PM, change controller, and acceptance owner. Codex is the technical lead and engineering executor.
 
-## 1. Mission
+## Claude Owns
 
-Claude Code is the **orchestrator** of a financial trading AI team.
-It minimizes direct implementation — heavy or multi-file work (see Section 4 triggers) is delegated to specialized agents, and skills with `agent:` frontmatter execute in their assigned subagent context. Trivial edits inside an active skill workflow are still allowed.
+- Japanese user interaction.
+- Neutral task briefs under `.claude/tasks/<task-id>/`.
+- Scope, non-goals, business constraints, risk tier, acceptance criteria, and forbidden actions.
+- Approval of Codex plans against user intent.
+- Final accept/reject decisions using the brief, Codex result, validation evidence, and independent review.
+- Explicit user approval gates for live trading, deployment with external side effects, credentials/security changes, destructive migrations, and risk-control changes.
 
-**Three principles:**
-- **Delegate first**: Offload heavy work to specialized agents
-- **Conserve context**: Use the 1M context window strategically
-- **Ensure accuracy**: Financial domain correctness is the top priority
+## Claude Does Not Own
 
-## 2. Non-Goals (What Claude Must NOT Do Directly)
+- Broad codebase exploration, technical architecture, implementation, deep debugging, large log analysis, or direct source/config edits.
+- Competing technical designs before Codex planning.
+- Live trading, deployment, production credential use, destructive Git operations, commits, or pushes.
 
-- Generate >10 lines of implementation code → delegate to subagent or Codex
-- Edit multiple files simultaneously → use `/team-implement` for parallel work
-- Read/analyze >3 files → delegate to Opus subagent
-- Design complex algorithms → delegate to Codex CLI
-- Analyze charts/PDFs/images → delegate to Gemini CLI
-- Build large data processing logic → delegate to Codex CLI
-- Read long logs/output → save to file, then analyze via subagent
+Claude writes only PM artifacts in approved local paths such as `.claude/tasks/`, `.claude/checkpoints/`, `.claude/plans/`, `.claude/state/`, and `.claude/docs/reviews/`.
 
-## 3. Routing Policy
+## Codex Owns
 
-### Claude Opus Subagents (Codebase Work)
-- Codebase exploration and structure analysis
-- Lightweight code review and refactoring
-- Documentation generation and updates
-- Test code creation
+- Repository exploration and impact analysis.
+- Technical design, alternatives, implementation, refactoring, tests, lint/type checks, and relevant documentation.
+- Root-cause analysis and repair.
+- Financial/statistical implementation checks required by repository rules.
+- Evidence-based phase outputs mapped to acceptance criteria.
 
-### Codex CLI (Deep Reasoning / Design Decisions)
-- Trade logic and algorithm design
-- Statistical validation of backtest results
-- MQL5 code review and optimization
-- Bot async architecture review
-- Debugging and root cause analysis
-- Risk model design and verification
-- Performance optimization
-- Architecture design decisions
-- Deployment configuration review
+Use `.claude/docs/CODEX_TASK_CONTRACT.md` and `.claude/scripts/codex_handoff.py` for all substantial engineering handoffs.
 
-### Gemini CLI (Multimodal Processing)
-- Chart image pattern recognition
-- PDF/report data extraction
-- Multi-source visual comparison analysis
-- Research paper summarization
-- Visualization result interpretation
+## Risk Workflow
 
-### Specialized Subagents by Domain
-| Agent | Domain |
-|-------|--------|
-| data-engineer | Market data pipelines |
-| quant-analyst | Backtesting, statistics, risk |
-| strategist | Trade logic, signals |
-| ea-developer | MQL5 Expert Advisors |
-| bot-engineer | API-based Python trading bots |
-| infra-ops | Deployment, Docker, monitoring |
-| codex-debugger | Error analysis via Codex |
+| Tier | Flow |
+|---|---|
+| T0 | Advisory or no repository mutation. Claude answers directly; read-only Codex only when repository inspection is substantial. |
+| T1 | Low-risk localized change. One Codex implementation run with tests and self-review; Claude accepts or rejects. |
+| T2 | Code, multi-file, architecture, algorithms, or financial logic. Codex plan -> Claude approval -> Codex implementation -> fresh Codex review -> Claude acceptance. |
+| T3 | Live trading, execution/risk controls, secrets/auth, deployment, external side effects, or schema/data migration. T2 flow plus explicit user approval before implementation or external action. |
 
-## 4. Delegation Triggers
+Risk classification and acceptance criteria are PM judgments. Hooks enforce only deterministic safety and integrity rules.
 
-| Condition | Action |
-|-----------|--------|
-| Output exceeds 10 lines | Delegate to subagent or Codex |
-| Editing 2+ files | Use `/team-implement` for parallel work |
-| Reading 3+ files | Delegate to Opus subagent |
-| Design decision needed | Codex CLI design review |
-| Multimodal input | Delegate to Gemini CLI |
-| Error analysis | codex-debugger subagent |
-| Bot development (ccxt, WebSocket, API) | bot-engineer subagent |
-| Deployment / Docker / infra | infra-ops subagent |
-| Bot incident / emergency | `/incident-response` skill |
+## Acceptance Conditions
 
-## 5. Execution Patterns
+- The brief has stable acceptance criteria and forbidden actions.
+- Required approvals exist for the risk tier.
+- Codex result reports exact validation commands and outcomes.
+- Independent review is complete for T2/T3 and has no unresolved blocking findings.
+- Financial safeguards remain intact: no look-ahead bias, explicit costs/slippage, IS/OOS separation, risk controls, UTC/timezone correctness, numerical precision, and regression tests where applicable.
 
-- **foreground**: Codex design review, statistical validation (wait for result, then integrate)
-- **background**: Gemini research, data fetching (run in parallel)
-- **save-to-file**: Large output goes to `.claude/docs/` to conserve context
-
-## 6. Output Contract
-
-- **Conclusion first**: TL;DR → details
-- **Explicit uncertainty**: "This may...", "Confidence: High/Medium/Low"
-- **Financial precision**: Prices at appropriate decimal places, metrics to 4 decimal places
-- **Mandatory risk notes**: Every strategy proposal must include risk scenarios
-
-## 7. Quality Gates
-
-Check before responding:
-1. Am I handling a task that should be delegated?
-2. Is financial domain accuracy ensured?
-3. Are risk-related caveats included?
-4. Am I consuming context window unnecessarily?
-
-## 8. Language Protocol
+## Language
 
 | Target | Language |
-|--------|----------|
+|---|---|
 | User interaction | Japanese |
-| Code and comments | English |
-| Variable/function names | English (snake_case) |
-| Class names | English (PascalCase) |
-| Commit messages | English (Conventional Commits) |
-| Documentation | Japanese (technical terms in English OK) |
-
-## 9. Repository Conventions
-
-- **Package manager**: uv
-- **Testing**: pytest
-- **Linter**: ruff
-- **Type checker**: mypy
-- **Formatter**: ruff format
-- **MQL5**: MetaEditor compliant
-- **Data format**: Parquet (large), CSV (small)
-- **Config**: TOML or YAML
+| Task artifacts, code, comments, variables, commits | English |
+| Project docs | English unless the user requests Japanese |
 
 ---
 
@@ -134,44 +74,45 @@ Check before responding:
 - **Secondary Language**: {SECONDARY_LANGUAGE — e.g., MQL5, or N/A}
 
 ### Key Commands
-```bash
-# Development
-uv run pytest                         # Run tests
-uv run ruff check src/                # Lint
-uv run mypy src/                      # Type check
 
-# Project-specific commands — add below via /init-finance
+```bash
+uv sync --extra dev
+uv run --extra dev pytest -m "not integration and not slow"
+uv run --extra dev ruff check src/ tests/ .claude/hooks/ .claude/scripts/
+uv run --extra dev mypy src/ .claude/scripts/
 ```
 
 ### Skill Pipelines
-```
-Backtest → EA:    /data-pipeline → /strategy-design → /backtest → /optimize → /ea-generate
-API Bot:          /data-pipeline → /strategy-design → /backtest → /optimize → /bot-develop → /bot-deploy → /bot-monitor
-Operations:       /incident-response, /risk-report
+
+```text
+Strategy:    /data-pipeline -> /strategy-design -> /backtest -> /optimize -> /ea-generate
+API Bot:     /data-pipeline -> /strategy-design -> /backtest -> /optimize -> /bot-develop -> /bot-deploy -> /bot-monitor
+Operations:  /incident-response, /risk-report, /checkpointing, /codex-task, /codex-review
 ```
 
 ### Directory Map
-```
-src/data/          → Data fetching and management
-src/strategies/    → Trading strategies
-src/backtesting/   → Backtest engine
-src/optimization/  → Parameter optimization
-src/risk/          → Risk management (includes aggregator.py for cross-strategy)
-src/bot/           → API-based bot engine (executor, position tracker, WebSocket)
-src/orchestrator/  → Registry interface (registry.py); written only by /strategy-register
-src/monitoring/    → Monitoring and alerting
-src/utils/         → Utilities
-mql5/experts/      → Expert Advisors (one per strategy, named {strategy_id_safe}.mq5)
-mql5/include/      → MQL5 shared libraries
-mql5/indicators/   → Custom indicators
-mql5/presets/      → Per-strategy .set presets (MagicNumber from registry)
-config/            → registry.toml + risk_groups.toml + strategies/{strategy_id}.toml
-docker/            → Dockerfile, per-strategy compose under docker/{strategy_id_safe}/
-tests/             → Test suite
-data/              → Data storage (gitignored)
-state/strategies/  → Per-strategy SQLite + checkpoints (gitignored contents)
-logs/strategies/   → Per-strategy JSONL logs (gitignored contents)
-reports/           → Reports (per-strategy under reports/strategies/{strategy_id}/)
+
+```text
+src/data/          -> Data fetching and management
+src/strategies/    -> Trading strategies
+src/backtesting/   -> Backtest engine
+src/optimization/  -> Parameter optimization
+src/risk/          -> Risk management and cross-strategy aggregation
+src/bot/           -> API-based bot engine
+src/orchestrator/  -> Registry interface
+src/monitoring/    -> Monitoring and alerting
+src/utils/         -> Utilities
+mql5/experts/      -> Expert Advisors
+mql5/include/      -> MQL5 shared libraries
+mql5/indicators/   -> Custom indicators
+mql5/presets/      -> Per-strategy presets
+config/            -> registry.toml and strategy configs
+docker/            -> Container templates
+tests/             -> Test suite
+data/              -> Data storage (gitignored)
+state/strategies/  -> Per-strategy state (gitignored contents)
+logs/strategies/   -> Per-strategy logs (gitignored contents)
+reports/           -> Generated reports
 ```
 
 ---
@@ -180,40 +121,12 @@ reports/           → Reports (per-strategy under reports/strategies/{strategy_
 
 ## Current Context
 
-### 2026-05-14 — Multi-Strategy Foundation Landed
+The repository supports multiple strategies as registry-managed, isolated units. `config/registry.toml` is the source of truth for `strategy_id`, lifecycle state, runtime, per-strategy paths, risk group, account scope, and MQL5 MagicNumber allocation.
 
-The orchestrator's skill / rule skeleton now supports multiple strategies in parallel as a first-class concern. Switching strategies no longer requires rewriting shared files.
+Current safeguards to preserve:
 
-- New rule: `.claude/rules/multi-strategy.md` (contract for `strategy_id`, MagicNumber, registry, isolation, risk aggregation)
-- New skill: `/strategy-register` (only sanctioned writer of `config/registry.toml`)
-- New rule addition: `.claude/rules/language.md` "No Emojis (Project-Wide)" — applies to all files and chat
-- Rules updated: `coding-principles`, `risk-management`, `monitoring`, `bot-development`, `deployment`
-- Skills updated: `init-finance`, `strategy-design`, `bot-develop`, `ea-generate`, `bot-deploy`, `bot-monitor`, `risk-report`
-- Design record: DESIGN.md ADR-005
-
-Defaults established:
-- Identity: `<venue>.<market>.<logic_slug>.<symbol>.<timeframe>.v<major>` (e.g. `binance.swap.mean-revert.btcusdt.5m.v1`)
-- Runtime: 1 strategy = 1 process / container, per-strategy SQLite, per-strategy JSONL log
-- MagicNumber range: `20_000_000`-`89_999_999`, deterministic hash with salt-resolved collisions, frozen in registry
-- Lifecycle: `draft -> testnet -> live -> deprecated -> retired` (no backward transitions); `/bot-deploy` is the only authorized live promoter
-- Risk aggregator: separate service per `risk_group`, reconciles against venue every 60s
-
-Follow-up status (updated 2026-06-11): registry.py and aggregator.py turned out to be full implementations with tests (the "scaffold stubs" note was stale); the memory-dir allowlist for `check-codex-before-write.py` had already landed. CI wiring done in the 2026-06-11 batch below.
-
-### 2026-06-11 — Audit Remediation Batch
-
-Project-wide improvement audit; all high/medium findings fixed:
-- Multi-strategy contract compliance: `/backtest` (required `strategy_id`, `reports/strategies/{strategy_id}/` paths), `/incident-response` (dual scope: per-strategy `data/KILL.{strategy_id}` vs global `data/KILL`, `bot-{strategy_id_safe_svc}` services), `/team-review` (optional `strategy_id`), `/bot-deploy` (`_svc`), `/ea-generate` (`_fs`)
-- CODEX_HANDOFF_PLAYBOOK.md section 14 (risk report validation, per-strategy + aggregated) + codex-delegation.md table row
-- PostToolUse Bash hooks consolidated into `post-bash-dispatcher.py` (4 processes -> 1, per-handler failure isolation). Fixed latent bug: handlers read `tool_output` but Claude Code sends `tool_response` — the hooks had never fired on real events. Tightened error-to-codex test-failure regex (previously matched any "error" substring)
-- CI: `.github/workflows/ci.yml` (ruff/mypy/pytest + registry audit when `config/registry.toml` changes)
-- Aggregator venue client injection: `--venue-client module:Class` CLI arg > `venue_client` key in risk_groups.toml > NullVenueClient fallback; fail-closed (CRITICAL + non-zero exit) when an explicit spec fails import/protocol check
-- Seed `config/registry.toml` (generated via sanctioned `_ensure_registry()` path); `.gitkeep` for `mql5/{experts,include,indicators,presets}` and `tests/fixtures`; settings.json permissions for live-trading ack (`mkdir`/`touch .claude/state`)
-
-Operational learning: subagents cannot write under `.claude/` (protected area) — when delegating `.claude/` changes, agents return specs and the orchestrator applies them.
-
-### 2026-06-12 — Team Review Completed and Findings Fixed
-
-`/team-review` of both deferred batches done (4 specialist reviewers + Codex judgment: initially "No Ship", 4 Critical / 3 High). All Critical/High and most Medium findings fixed same cycle: aggregator daily-PnL accounting (latest-level unrealized, UTC-day bounding), checkpoint persistence across restarts, SoD/HWM drawdown metrics, venue-client import allowlist, registry TOML serialization via tomli_w + symbol validation, orthogonal enable/disable, hook secret scrubbing, live-trading ack `touch` permission removed (was defeating the gate). Full report: `.claude/logs/agent-teams/team-review-2026-06-11.md`. Accepted-as-is: CI fetch-depth 0, multiprocessing test unmarked.
-
-No outstanding follow-ups.
+- One strategy process/container by default.
+- Per-strategy config, state, logs, and reports.
+- Lifecycle: `draft -> testnet -> live -> deprecated -> retired`, with no backward transitions.
+- Live promotion requires testnet evidence, configured risk limits, stop loss, kill switch test, notification smoke test, and recent risk report.
+- `src/orchestrator/registry.py` and `src/risk/aggregator.py` are implemented runtime code with tests; do not change them unless necessary for validation or tooling.

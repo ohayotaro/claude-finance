@@ -1,89 +1,35 @@
 # Codex Delegation Rules
 
-## When to Delegate to Codex CLI
+Codex is the technical lead for repository exploration, design, implementation, debugging, tests, and independent review. Claude owns the task brief, risk tier, approval gates, and final acceptance.
 
-### Design & Architecture
-- New class/module design decisions
-- Trade logic algorithm design
-- Risk model mathematical design
-- Data pipeline architecture decisions
-- Strategy optimization algorithms
+## Canonical Contract
 
-### Code Review
-- Strategy code statistical correctness
-- MQL5 EA order management logic
-- Risk calculation numerical precision
-- Performance-critical code paths
+Use `.claude/docs/CODEX_TASK_CONTRACT.md` for the task schema, risk tiers, phase outputs, and runner usage. Do not duplicate large prompts in skills or hooks.
 
-### Debugging & Analysis
-- Python traceback root cause analysis
-- MQL5 compilation error resolution
-- Backtest result anomaly analysis
-- Data quality issue diagnosis
+## Workflow
 
-### Statistical Validation
-- Backtest result significance testing
-- Overfitting risk quantitative assessment
-- Parameter stability analysis
-- Walk-forward validation
+1. Claude creates `.claude/tasks/<task-id>/brief.md` with objective, scope, non-goals, acceptance criteria, risk tier, required validation, forbidden actions, and blockers.
+2. T1 may run one implementation phase directly when the brief justifies low localized risk.
+3. T2 and T3 require `plan.md`, Claude `approval.md`, implementation, independent review, then Claude acceptance.
+4. T3 additionally requires explicit user approval before implementation or any external action.
 
-## Command Templates
+## Runner
 
-**Canonical location**: `.claude/docs/CODEX_HANDOFF_PLAYBOOK.md`. All Codex prompt templates live there with their full structured form. Reference by section number when invoking — do not copy template bodies into skills or rules (avoids drift).
+```bash
+python3 .claude/scripts/codex_handoff.py plan <task-id>
+python3 .claude/scripts/codex_handoff.py implement <task-id>
+python3 .claude/scripts/codex_handoff.py review <task-id>
+```
 
-| Use case | Playbook section |
-|---|---|
-| Strategy design review | §1 Strategy Design Review |
-| Backtest statistical validation | §2 Backtest Statistical Validation |
-| MQL5 EA code review | §3 MQL5 EA Code Review |
-| Error root cause analysis (auto-fix) | §4 Error Root Cause Analysis |
-| Algorithm / performance optimization | §5 Algorithm Optimization |
-| Risk model design | §6 Risk Model Design |
-| Team-review final judgment | §7 Team Review — Final Judgment |
-| Incident postmortem | §8 Incident Root Cause Analysis |
-| IR analysis synthesis | §9 IR Analysis Synthesis |
-| Equity screener validation | §10 Equity Screener Criteria Validation |
-| Sector rotation review | §11 Sector Rotation Logic Review |
-| Optimization result validation | §12 Optimization Result Validation |
-| ML pipeline validation | §13 ML Pipeline Validation |
-| Risk report validation | §14 Risk Report Validation |
-
-For one-off consultations that do not match any section, use `/codex-system` skill (it wraps `codex exec` with the standard invocation flags).
+The runner passes prompts through stdin, uses strict config, isolates phases with ephemeral invocations, uses read-only sandboxing for plan/review, uses workspace-write for implementation, and fails closed on missing prerequisites, empty output, Codex failure, task path traversal, or declared network requirements.
 
 ## Failure Handling
 
-When a Codex CLI call fails (non-zero exit code, timeout, or empty output):
+If Codex fails, do not silently continue. Report:
 
-1. **Notify the user immediately** with:
-   - What was being delegated (task description)
-   - The error (exit code, stderr, or "empty response")
-   - Which skill step was affected
-2. **Do NOT silently skip the step** — the delegation was requested because the task requires deep reasoning. Skipping it degrades quality.
-3. **Offer alternatives:**
-   - Retry the same command
-   - Proceed without Codex but flag the result as **unvalidated** (mark clearly in output)
-   - User runs Codex interactively in a separate terminal (`! codex "..."`)
-4. **Log the failure** — if `/bot-monitor` or structured logging is active, emit a log event.
+- Phase and task ID
+- Exit status or runner error
+- Missing prerequisite or validation gap
+- Whether the task is `BLOCKED`, needs a revised brief, or needs explicit user approval
 
-**Example notification:**
-```
-Codex delegation failed:
-  Task: "Validate backtest results (Sharpe significance)"
-  Error: exit code 1 — "rate limit exceeded"
-  Skill: /backtest Step 6
-  
-  Options:
-  1. Retry
-  2. Continue without Codex validation (result will be marked as unvalidated)
-  3. Run manually: ! codex exec "Validate backtest results: ..."
-```
-
-## Response Requirements
-
-Codex responses must follow this structure:
-1. TL;DR (3 lines max)
-2. Analysis (detailed)
-3. Plan (implementation steps)
-4. Code (if applicable)
-5. Validation (verification method)
-6. Risks (mandatory)
+Acceptance criteria may not be relaxed without updating the brief and getting PM approval.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PostToolUse hook (Bash): Log codex and gemini CLI command usage to
+"""PostToolUse hook (Bash): Log Codex CLI metadata to
 .claude/logs/cli-tools.jsonl for session tracking and analytics.
 
 Can be run standalone (reads JSON from stdin) or imported by the dispatcher
@@ -7,20 +7,47 @@ via handle(payload).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shlex
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
-LOG_FILE = os.path.join(
-    os.environ.get("CLAUDE_PROJECT_DIR", "."),
-    ".claude", "logs", "cli-tools.jsonl",
-)
-
-TRACKED_COMMANDS = ["codex", "gemini"]
+TRACKED_COMMAND = "codex"
 
 
-def handle(data):
+def _log_file() -> Path:
+    return Path(os.environ.get("CLAUDE_PROJECT_DIR", ".")) / ".claude" / "logs" / "cli-tools.jsonl"
+
+
+def _command_metadata(command: str) -> dict[str, str] | None:
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+    if TRACKED_COMMAND not in [os.path.basename(part) for part in parts]:
+        return None
+
+    codex_index = next(
+        index for index, part in enumerate(parts) if os.path.basename(part) == TRACKED_COMMAND
+    )
+    mode = "unknown"
+    for token in parts[codex_index + 1 :]:
+        if token.startswith("-"):
+            continue
+        mode = token
+        break
+    return {"tool": TRACKED_COMMAND, "mode": mode}
+
+
+def _stable_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+
+def handle(data: dict[str, Any]) -> None:
     """Process a parsed PostToolUse payload.
 
     Logs CLI tool usage to JSONL file. Always returns None (no advisory output).
@@ -29,11 +56,8 @@ def handle(data):
     tool_input = data.get("tool_input", {})
     command = tool_input.get("command", "")
 
-    # Only log tracked CLI tool usage
-    if not any(
-        command.startswith(cmd) or (" %s " % cmd) in command
-        for cmd in TRACKED_COMMANDS
-    ):
+    metadata = _command_metadata(command)
+    if metadata is None:
         return None
 
     # Claude Code emits the tool result as "tool_response"; accept the
@@ -41,28 +65,24 @@ def handle(data):
     tool_output = data.get("tool_response") or data.get("tool_output") or {}
     if not isinstance(tool_output, dict):
         tool_output = {}
-    stdout = tool_output.get("stdout", "")
-    exit_code = tool_output.get("exit_code", None)
-
-    # Determine which tool was used
-    tool_name = "unknown"
-    for cmd in TRACKED_COMMANDS:
-        if cmd in command:
-            tool_name = cmd
-            break
+    stdout = str(tool_output.get("stdout", ""))
+    stderr = str(tool_output.get("stderr", ""))
+    exit_code = tool_output.get("exit_code")
 
     log_entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "tool": tool_name,
-        "command": command[:500],  # Truncate long commands
+        "timestamp": datetime.now(UTC).isoformat(),
+        "tool": metadata["tool"],
+        "mode": metadata["mode"],
         "exit_code": exit_code,
         "output_length": len(stdout),
-        "session_id": data.get("session_id", ""),
+        "stderr_length": len(stderr),
+        "session_id_hash": _stable_hash(str(data.get("session_id", ""))),
     }
 
     try:
-        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-        with open(LOG_FILE, "a") as f:
+        log_file = _log_file()
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with log_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry) + "\n")
     except OSError:
         pass  # Do not fail the hook on logging errors
@@ -70,7 +90,7 @@ def handle(data):
     return None
 
 
-def main():
+def main() -> None:
     """Standalone entry point: read JSON from stdin, run handle(), exit."""
     raw = sys.stdin.read()
     if not raw.strip():

@@ -18,23 +18,23 @@ All persistent documents in this project have defined update triggers. No docume
 
 | Event | Action |
 |-------|--------|
-| New agent/skill/module added | Add architecture decision record (ADR) |
+| New skill/module added | Add architecture decision record (ADR) when architecture changes |
 | Architecture pattern changed | Update relevant ADR |
 | `/strategy-design` produces new architecture | Append strategy architecture summary |
 | `/bot-develop` finalizes bot architecture | Append bot component diagram |
-| `/team-review` identifies architecture issues | Update with resolution |
+| `/codex-review` identifies architecture issues | Update with resolution |
 
 **Ownership**: Orchestrator updates after any structural change. Codex reviews for consistency.
 
-### .claude/docs/CODEX_HANDOFF_PLAYBOOK.md
+### .claude/docs/CODEX_TASK_CONTRACT.md
 
 | Event | Action |
 |-------|--------|
-| New Codex delegation pattern discovered | Add new template section |
-| Existing template produces poor results | Revise template with improved prompt |
-| New skill with Codex integration added | Add corresponding handoff template |
+| Task brief schema changes | Update the canonical schema |
+| Phase output contract changes | Update plan, implementation, or review output requirements |
+| Runner behavior changes | Update runner usage and guarantees |
 
-**Ownership**: Updated when a Codex delegation succeeds or fails in a notable way.
+**Ownership**: Updated when the Claude PM to Codex engineering contract changes.
 
 ### MEMORY.md (Claude Code auto memory)
 
@@ -118,22 +118,22 @@ The orchestrator checks the following conditions on `/checkpointing` or session 
 
 **Problem**: The exchange updated their API (version bump, endpoint deprecation, new rate limits), but the spec was not re-researched. Implementation may use deprecated endpoints or violate new rate limits.
 
-**Action**: Re-run the API specification research (Gemini or official docs). Update the spec. Verify client code matches.
+**Action**: Re-run the API specification research from official docs. If network access is required, record it in the task brief and obtain explicit handling before implementation. Update the spec and verify client code matches.
 
 **Secondary check**: If the spec file's last-modified date is >6 months old AND the code references it, flag for verification regardless.
 
-### 4. CODEX_HANDOFF_PLAYBOOK.md — Missing Templates
+### 4. CODEX_TASK_CONTRACT.md — Contract Drift
 
-**Condition**: A skill in `.claude/skills/` contains `codex exec` or `Bash(codex *)` in its SKILL.md, but no corresponding template section exists in CODEX_HANDOFF_PLAYBOOK.md.
+**Condition**: A skill describes a task flow or phase output that does not match `.claude/docs/CODEX_TASK_CONTRACT.md`.
 
-**Problem**: Codex delegation happens via ad-hoc prompts instead of the vetted playbook templates, leading to inconsistent quality.
+**Problem**: Claude PM artifacts and Codex phase outputs can drift, reducing auditability.
 
-**Action**: For each unmatched skill, add a playbook template section based on the skill's Codex usage pattern.
+**Action**: Update the skill or the canonical contract so the risk-tier flow, task brief schema, and phase output requirements agree.
 
-### 5. routing-keywords.json — Agent/Keyword Mismatch
+### 5. Skill and Runner Drift
 
-**Condition**: An agent exists in `.claude/agents/` but has no corresponding entry in `routing-keywords.json`, or an entry references an agent that no longer exists.
+**Condition**: A skill embeds large handoff prompts or direct Codex flag templates instead of invoking `.claude/scripts/codex_handoff.py`.
 
-**Problem**: The agent-router hook cannot route prompts to the agent, so it is never automatically suggested.
+**Problem**: Delegation becomes non-deterministic and hard to audit.
 
-**Action**: Add keywords for the missing agent, or remove the orphaned entry.
+**Action**: Convert the skill to a thin PM intake checklist that references the canonical task contract and central runner.

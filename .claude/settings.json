@@ -2,13 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(python *)",
+      "Bash(python3 *)",
       "Bash(uv *)",
       "Bash(pytest *)",
       "Bash(ruff *)",
       "Bash(mypy *)",
       "Bash(git *)",
       "Bash(codex *)",
-      "Bash(gemini *)",
       "Bash(docker *)",
       "Bash(docker compose *)",
       "Bash(systemctl *)",
@@ -21,39 +21,19 @@
     ],
     "deny": [
       "Bash(rm -rf *)",
-      "Bash(* --no-verify)"
+      "Bash(* --no-verify)",
+      "Bash(codex * --search *)",
+      "Bash(codex * --dangerously-bypass-approvals-and-sandbox *)"
     ]
   },
   "hooks": {
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent-router.py\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-codex-before-write.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "WebSearch|WebFetch",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/suggest-gemini-research.py\"",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pm-write-guard.py\"",
             "timeout": 5
           }
         ]
@@ -79,21 +59,6 @@
             "timeout": 10
           }
         ]
-      },
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-implementation-review.py\"",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint-on-save.py\"",
-            "timeout": 10
-          }
-        ]
       }
     ],
     "PreCompact": [
@@ -102,25 +67,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'CRITICAL CONTEXT: Reload CLAUDE.md, .claude/docs/DESIGN.md, and current strategy context from Zone C before continuing.'"
-          }
-        ]
-      }
-    ],
-    "TeammateIdle": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Reminder: Check shared task list, write work log to .claude/logs/agent-teams/, report status to team lead.'"
+            "command": "echo 'CRITICAL CONTEXT: Reload CLAUDE.md, AGENTS.md, .claude/docs/CODEX_TASK_CONTRACT.md, and the current task brief before continuing.'"
           }
         ]
       }
     ]
-  },
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-opus-4-6"
   }
 }

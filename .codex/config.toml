@@ -1,2 +1,2 @@
-model = "gpt-5.4"
-approval_mode = "suggest"
+sandbox_mode = "read-only"
+approval_policy = "never"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """PostToolUse hook (Bash): Detect error patterns in command output and suggest
-routing to the codex-debugger subagent.
+the canonical Codex debug workflow.
 
 Can be run standalone (reads JSON from stdin) or imported by the dispatcher
 via handle(payload).
@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from typing import Any
 
 # Commands to ignore (trivial or read-only, unlikely to need debugging)
 IGNORE_COMMANDS = [
@@ -52,14 +53,14 @@ _SECRET_PATTERNS = [
 ]
 
 
-def _scrub(text):
+def _scrub(text: str) -> str:
     """Redact secret-looking substrings from text."""
     for pattern, replacement in _SECRET_PATTERNS:
         text = pattern.sub(replacement, text)
     return text
 
 
-def handle(data):
+def handle(data: dict[str, Any]) -> str | None:
     """Process a parsed PostToolUse payload.
 
     Returns additionalContext string if errors detected, None otherwise.
@@ -79,7 +80,7 @@ def handle(data):
         tool_output = {}
     stdout = tool_output.get("stdout", "")
     stderr = tool_output.get("stderr", "")
-    output = "%s\n%s" % (stdout, stderr)
+    output = f"{stdout}\n{stderr}"
 
     if len(output.strip()) < 10:
         return None
@@ -98,18 +99,19 @@ def handle(data):
     error_types = ", ".join(set(detected))
 
     context = (
-        "ERROR DETECTED (%s):\n"
-        "Command: `%s`\n"
-        "```\n%s\n```\n"
-        "Consider delegating to the codex-debugger subagent for root cause analysis:\n"
-        "Use agent type 'codex-debugger' or run:\n"
-        '`codex exec --full-auto "Debug: %s in command: %s"`'
-    ) % (error_types, command, error_snippet, error_types, command)
+        f"ERROR DETECTED ({error_types}):\n"
+        f"Command: `{command}`\n"
+        f"```\n{error_snippet}\n```\n"
+        "Recommended flow: create a task brief under `.claude/tasks/<task-id>/brief.md` "
+        "and run `.claude/scripts/codex_handoff.py plan|implement|review` according to "
+        "the task risk tier. For a localized T1 debug fix, use the implementation phase "
+        "with exact failing command evidence in the brief."
+    )
 
     return context
 
 
-def main():
+def main() -> None:
     """Standalone entry point: read JSON from stdin, run handle(), emit result."""
     raw = sys.stdin.read()
     if not raw.strip():

@@ -70,7 +70,7 @@ def handle(data):
         tool_output = {}
     stdout = tool_output.get("stdout", "")
     stderr = tool_output.get("stderr", "")
-    output = "%s\n%s" % (stdout, stderr)
+    output = f"{stdout}\n{stderr}"
 
     if len(output.strip()) < 10:
         return None
@@ -101,11 +101,11 @@ def handle(data):
         action = "Monitor the situation. If persistent, use `/incident-response`."
 
     context = (
-        "BOT %s (%s):\n"
-        "Command: `%s`\n"
-        "```\n%s\n```\n"
-        "%s"
-    ) % (severity, error_types, command, snippet, action)
+        f"BOT {severity} ({error_types}):\n"
+        f"Command: `{command}`\n"
+        f"```\n{snippet}\n```\n"
+        f"{action}"
+    )
 
     return context
 

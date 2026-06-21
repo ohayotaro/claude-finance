@@ -1,231 +1,169 @@
 # Finance AI Orchestrator
 
-> Claude Code (Opus 4.7, 1M context) as orchestrator, coordinating Codex CLI and Gemini CLI as specialized agents for a financial trading AI team. Markets-agnostic — crypto / FX / futures / equities, with optional MQL5 EA generation.
+Financial-trading orchestration template with a two-provider operating model:
 
+```text
+Claude Opus  -> PM, user interaction, task brief, approval gates, acceptance
+Codex        -> technical lead, repository exploration, design, implementation, tests, review
 ```
-Claude Code (Orchestrator) ─┬─ Codex CLI       (algorithm design, statistical validation, risk modeling)
-                             ├─ Gemini CLI      (chart / PDF / IR-report multimodal extraction)
-                             └─ Opus subagents  (data, strategy, EA, bot, ML, infra, debug, docs)
-```
 
-- **9 role-based agents** (data-engineer, quant-analyst, strategist, ea-developer, bot-engineer, infra-ops, ml-engineer, codex-debugger, general-purpose)
-- **24 skills** spanning data pipeline, strategy design, backtest, optimization, MQL5 EA generation, bot development / deployment / monitoring, ML pipelines, equity research, IR analysis, risk reporting, and incident response
-- **12 rules** covering financial domain (no look-ahead bias, mandatory transaction costs, OOS testing), risk management (mandatory stops, layered safety gates, circuit breakers), security, deployment, monitoring, plus delegation protocols for Codex and Gemini
-- **9 hooks** including `agent-router` (single primary + optional fallback), `check-codex-before-write`, `post-backtest-analysis` (threshold check + failure-aware), `post-bot-execution`, `error-to-codex`, `lint-on-save`, `log-cli-tools`, `suggest-gemini-research`, `post-implementation-review`
-- **Markets-agnostic via `/init-finance`**: target market, data sources, backtest framework, execution platform, and tooling all chosen at init time and recorded in CLAUDE.md Zone B
+The project is markets-agnostic: crypto, FX, futures, equities, and optional MQL5 EA generation. Financial safeguards such as no look-ahead bias, explicit transaction costs, IS/OOS separation, risk controls, live-trading gates, and multi-strategy registry isolation are preserved.
 
-## Quick start
-
-Install prerequisites first (see [Prerequisites](#prerequisites)). Then, in your trading-project directory:
+## Quick Start
 
 ```bash
 cd /path/to/your-trading-project
-git clone --depth 1 https://github.com/ohayotaro/claude-finance.git .starter \
-  && cp -r .starter/.claude .starter/.codex .starter/.gemini .starter/CLAUDE.md . \
-  && rm -rf .starter
+git clone --depth 1 https://github.com/ohayotaro/claude-finance.git .starter
+cp -r .starter/.claude .starter/.codex .starter/AGENTS.md .starter/CLAUDE.md .
+rm -rf .starter
+uv sync --extra dev
 claude
 ```
 
 Inside Claude Code:
 
-```
-/init-finance     # markets / data sources / backtest framework / execution platform wizard
+```text
+/init-finance
 ```
 
-After the wizard, `CLAUDE.md` Zone B describes your stack and the financial domain rules are activated.
+The wizard records project identity in `CLAUDE.md` Zone B. Substantial engineering tasks are converted into `.claude/tasks/<task-id>/brief.md` and delegated to Codex through `.claude/scripts/codex_handoff.py`.
 
 ## Prerequisites
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Claude Code | latest | `npm i -g @anthropic-ai/claude-code` |
-| Codex CLI | ≥0.121 | `brew install codex` (macOS) or `npm i -g @openai/codex` |
-| Gemini CLI | ≥0.38 | `npm i -g @google/gemini-cli` |
-| Git | any | system package manager |
-| Python | ≥3.11 | for hooks (`.claude/hooks/*.py`) |
-| uv | latest | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Tool | Purpose |
+|---|---|
+| Claude Code | PM and user-facing controller |
+| Codex CLI | technical design, implementation, tests, review |
+| Git | repository state and diffs |
+| Python 3.11+ | hooks, runner, tests |
+| uv | dependency and command runner |
 
-After install:
+Check local tools:
 
 ```bash
 claude --version
-codex --version  && codex login
-gemini --version && gemini login
+codex --version
+uv --version
 ```
 
-## What gets copied into your project
-
-```
-your-trading-project/
-├── CLAUDE.md                       # 3-Zone orchestrator contract
-├── .claude/
-│   ├── settings.json               # hooks + env + permission allowlist
-│   ├── agents/                     # 9 role-based Opus subagents
-│   ├── hooks/                      # 9 Python hooks
-│   ├── rules/                      # 12 domain rules
-│   ├── skills/                     # 24 skill definitions
-│   ├── routing-keywords.json       # routing config (customizable)
-│   ├── backtest-thresholds.json    # threshold config (customizable)
-│   └── docs/                       # DESIGN, CODEX_HANDOFF_PLAYBOOK, reviews/
-├── .codex/                         # Codex CLI contract + config
-└── .gemini/                        # Gemini CLI contract + config
-```
-
-Your project code (`src/`, `mql5/`, `tests/`, `data/`, etc.) is left alone. The template owns nothing outside the four targets above.
-
-## Workflow
-
-```
-Strategy:    /data-pipeline → /strategy-design → /backtest → /optimize ─┬→ /ea-generate
-                                                                         └→ /bot-develop → /bot-deploy → /bot-monitor
-ML:          /data-pipeline → /ml-pipeline → /backtest → /optimize → /bot-develop
-Equity:      /equity-screener → /earnings-calendar → /sector-analysis → /ir-analysis → /strategy-design
-Risk & ops:  /risk-report, /team-review, /incident-response, /checkpointing
-```
-
-See `.claude/docs/DESIGN.md` for the full architecture, routing policy, and rationale.
-
-## Skills
-
-24 skills organized by purpose. Full spec for each is at `.claude/skills/<name>/SKILL.md`. The "Owner" column lists the agent or external CLI that performs the heavy work; the orchestrator drives the flow but does not implement.
-
-### Setup
-
-| Skill | Purpose | Owner |
-|---|---|---|
-| `/init-finance` | Project init wizard — markets, data sources, backtest framework, execution platform; populates CLAUDE.md Zone B and scaffolds `src/`, `mql5/`, `tests/`. | — |
-| `/checkpointing` | Zone C snapshot + 5 drift checks (Zone C overload, DESIGN.md vs code, api_specs/ version, playbook gaps, routing-keywords vs agents). Checkpoint files are local-only; only durable state (CLAUDE.md, docs/, reports/) is committed. | — |
-
-### Strategy pipeline
-
-| Skill | Purpose | Owner |
-|---|---|---|
-| `/data-pipeline` | Market-data fetch / normalize / Parquet store. Mandatory API spec research before client code. | data-engineer |
-| `/strategy-design` | Parallel Researcher / Strategist / Gemini analysis → Codex algorithm review → strategy spec. | strategist + Codex |
-| `/backtest` | Backtest run with IS/OOS split, Codex statistical validation (Sharpe p-value, bootstrap CI), optional Gemini chart interpretation. | quant-analyst + Codex |
-| `/optimize` | Walk-forward optimization with Optuna, overfitting detection, Monte Carlo robustness. | quant-analyst + Codex |
-| `/market-analysis` | Multi-timeframe analysis with Gemini chart pattern recognition. | Gemini |
-
-### Equity research
-
-| Skill | Purpose | Owner |
-|---|---|---|
-| `/equity-screener` | Fundamental + technical screening (PER / PBR / ROE, growth, sector filters). | quant-analyst + Codex |
-| `/earnings-calendar` | Earnings dates, dividends, corporate actions for event-driven strategies. | data-engineer |
-| `/sector-analysis` | Sector performance comparison, rotation signals, cross-sector correlation. | quant-analyst + Codex |
-| `/ir-analysis` | Investor-focused report from IR materials (annual reports, calls, ESG) — Gemini PDF extraction + Codex synthesis. | Codex + Gemini |
-
-### Bot & EA
-
-| Skill | Purpose | Owner |
-|---|---|---|
-| `/ea-generate` | Python strategy → MQL5 Expert Advisor conversion with Codex code review. | ea-developer + Codex |
-| `/bot-develop` | API bot (ccxt / WebSocket / asyncio) with order state machine, structured logging contract, testnet validation. | bot-engineer + Codex |
-| `/bot-deploy` | Docker / systemd / launchd deployment, health checks, env-var secret management. | infra-ops + Codex |
-| `/bot-monitor` | Structured logging, core metrics (uptime, PnL, latency, errors), alert thresholds, notification channels. | infra-ops |
-
-### ML
-
-| Skill | Purpose | Owner |
-|---|---|---|
-| `/ml-pipeline` | Feature engineering → walk-forward (purge / embargo) → Optuna HPO → overfitting detection → ablation. | ml-engineer + Codex |
-
-### Quality & risk
-
-| Skill | Purpose | Owner |
-|---|---|---|
-| `/team-review` | 4-track parallel review — Security, Quant, Live Reproducibility, Performance — with Codex final judgment. | Codex per track |
-| `/risk-report` | VaR / CVaR, stress testing, correlation analysis, Codex model validation. | quant-analyst + Codex |
-
-### Operations
-
-| Skill | Purpose | Owner |
-|---|---|---|
-| `/incident-response` | Trading bot incident handling — emergency stop → root cause (Codex) → recovery → postmortem. | Codex + relevant agents |
-| `/dashboard-develop` | Use-case-specific dashboards (bot monitoring / backtest / portfolio / research). Python-only stack (Streamlit / Dash / FastAPI + Jinja2 / Grafana). | infra-ops |
-| `/notification-setup` | Bot log events → notification channel routing design. | bot-engineer |
-| `/team-implement` | Agent Teams parallel implementation across disjoint file scopes per role. | role-specific agents |
-
-### Adapters
-
-| Skill | Purpose | Owner |
-|---|---|---|
-| `/codex-system` | One-off Codex consultation. | Codex |
-| `/gemini-system` | One-off Gemini multimodal task. | Gemini |
-
-## Updating the template
-
-Run `scripts/update.sh` from your project root to refresh the template. It backs up Zone B and customizable JSON, pulls the latest, then restores the backups.
+## Development Commands
 
 ```bash
-cd /path/to/your-trading-project
-bash <(curl -fsSL https://raw.githubusercontent.com/ohayotaro/claude-finance/main/scripts/update.sh)
+uv sync --extra dev
+uv run --extra dev ruff check src/ tests/ .claude/hooks/ .claude/scripts/
+uv run --extra dev mypy src/ .claude/scripts/
+uv run --extra dev pytest -m "not integration and not slow"
 ```
 
-Or, if `scripts/update.sh` is already in your tree:
+Registry audit:
+
+```bash
+uv run python -m src.orchestrator.registry audit
+```
+
+## Task Workflow
+
+All substantial work starts from a canonical task directory:
+
+```text
+.claude/tasks/<task-id>/
+├── brief.md       # Claude PM owns
+├── plan.md        # Codex plan output
+├── approval.md    # Claude PM approval for T2/T3
+├── result.md      # Codex implementation output
+└── review.md      # fresh Codex review output
+```
+
+Run phases through the central runner:
+
+```bash
+python3 .claude/scripts/codex_handoff.py plan <task-id>
+python3 .claude/scripts/codex_handoff.py implement <task-id>
+python3 .claude/scripts/codex_handoff.py review <task-id>
+```
+
+Risk tiers:
+
+| Tier | Flow |
+|---|---|
+| T0 | Advisory or no repository mutation. |
+| T1 | Low-risk localized change: one Codex implementation run with tests and self-review. |
+| T2 | Code, multi-file, architecture, algorithms, or financial logic: plan, approval, implementation, independent review. |
+| T3 | Live trading, execution/risk controls, secrets/auth, deployment, external effects, or migration: T2 plus explicit user approval before implementation or external action. |
+
+## What Gets Copied
+
+```text
+your-trading-project/
+├── AGENTS.md                         # Codex project contract
+├── CLAUDE.md                         # Claude PM contract and project identity
+├── .claude/
+│   ├── settings.json                 # deterministic hooks and permissions
+│   ├── hooks/                        # safety and telemetry hooks
+│   ├── rules/                        # financial, risk, testing, security rules
+│   ├── scripts/codex_handoff.py      # central Codex handoff runner
+│   ├── skills/                       # PM intake workflows
+│   ├── backtest-thresholds.json      # backtest warning thresholds
+│   └── docs/                         # task contract and design records
+└── .codex/config.toml                # safe project Codex defaults
+```
+
+Project code (`src/`, `mql5/`, `tests/`, `data/`, `reports/`, etc.) is left alone by the template updater.
+
+## Skill Pipelines
+
+```text
+Strategy:    /data-pipeline -> /strategy-design -> /backtest -> /optimize -> /ea-generate
+API Bot:     /data-pipeline -> /strategy-design -> /backtest -> /optimize -> /bot-develop -> /bot-deploy -> /bot-monitor
+Equity:      /equity-screener -> /earnings-calendar -> /sector-analysis -> /ir-analysis -> /strategy-design
+Operations:  /risk-report, /incident-response, /checkpointing, /codex-task, /codex-review
+```
+
+Skills are PM intake workflows. They gather domain inputs, add acceptance criteria and checklists to the canonical brief, invoke the central Codex runner, and perform acceptance. They do not own implementation.
+
+## Architecture
+
+Claude is intentionally not the engineering worker. It keeps the conversation with the user, classifies risk, creates neutral briefs, approves Codex plans, and accepts or rejects based on evidence.
+
+Codex performs repository exploration, design, implementation, tests, debugging, and independent review. Planning and review run read-only. Implementation runs workspace-write. The runner uses stdin prompts, strict config, non-interactive approval behavior, ephemeral invocations, result artifacts, JSONL event logs, and Git metadata.
+
+Hooks are deterministic only:
+
+- `pm-write-guard.py` blocks Claude source/config writes outside PM artifact paths.
+- `live-trading-gate.py` keeps live execution fail-closed without a fresh acknowledgment.
+- `post-bash-dispatcher.py` runs concise Bash telemetry and error/backtest/bot incident detectors.
+
+## Updating The Template
+
+From an installed project:
 
 ```bash
 ./scripts/update.sh
 ```
 
-Preserved (never touched, restored, or untouched-by-design):
-- `CLAUDE.md` Zone B (between `@orchestra:template-boundary` and `@orchestra:repo-boundary`) — backed up and restored
-- `.claude/routing-keywords.json`, `.claude/backtest-thresholds.json` — backed up and restored
-- `.claude/projects/` (project memory / auto-memory), `.claude/checkpoints/` (`/checkpointing` state), `.claude/plans/` (Plan-mode output), `.claude/logs/`, `.claude/tmp/` — never deleted
-- `.claude/settings.local.json` (per-machine overrides) — never deleted
-- Anything else under `.claude/` not in the overwrite list below — never deleted
+Or from the remote template:
 
-Overwritten: `.claude/{agents,hooks,rules,skills,docs}/`, `.claude/settings.json`, `.codex/`, `.gemini/`, `CLAUDE.md` Zone A. Untouched: project code (`src/`, `mql5/`, `tests/`), `pyproject.toml`, `README.md`.
-
-## Architecture
-
-```
-┌────────────────────────────────────────────────────────┐
-│      Claude Code (Opus 4.7, 1M)  — Orchestrator        │
-├──────────────────┬──────────────┬──────────────────────┤
-│  Opus Subagents  │  Codex CLI    │  Gemini CLI          │
-│ codebase work    │ algorithm     │ chart pattern        │
-│ implementation   │ statistics    │ PDF / IR reports     │
-│ review / docs    │ debugging     │ multimodal research  │
-│ parallel teams   │ risk modeling │ visualization        │
-└──────────────────┴──────────────┴──────────────────────┘
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/ohayotaro/claude-finance/main/scripts/update.sh)
 ```
 
-- **Codex** receives English-only structured prompts (templates in `.claude/docs/CODEX_HANDOFF_PLAYBOOK.md` covering strategy review, backtest validation, MQL5 review, error analysis, optimization, risk modeling, team-review, incident postmortem, IR synthesis, equity screening, sector rotation, optimization validation, ML validation) and returns the standard contract: TL;DR → Analysis → Plan → Validation → Risks → Confidence.
-- **Gemini** receives multimodal input (charts, PDFs, screenshots) and returns structured Markdown with confidence ratings (High / Medium / Low) per item.
-- **Opus subagents** are role-named, market-agnostic, and read CLAUDE.md Zone B at runtime.
+Preserved:
 
-The orchestration contract is enforced at the hook layer: `agent-router` selects a single primary route plus optional fallback (rather than dumping every keyword match), `check-codex-before-write` warns on design-touching edits, `post-backtest-analysis` checks thresholds and emits failure context on non-zero exit code, `post-implementation-review` counts net additions to avoid noisy reviews on repeated edits, `post-bot-execution` detects bot errors and connection drops, plus four more.
+- `CLAUDE.md` Zone B
+- `AGENTS.md` project-specific section
+- `.claude/tasks/`, `.claude/checkpoints/`, `.claude/plans/`, `.claude/logs/`, `.claude/state/`
+- `.claude/docs/incidents/`, `.claude/docs/reviews/`, `.claude/settings.local.json`
+- Project code and data outside template-managed paths
 
-### Configuration files
+Migrated away:
 
-| File | Purpose | Fallback |
-|---|---|---|
-| `.claude/routing-keywords.json` | Hook routing keywords per agent | built-in defaults |
-| `.claude/backtest-thresholds.json` | Per-metric warning thresholds | built-in defaults |
-| `.claude/settings.json` | Hooks, permissions, env vars | — |
-| `.codex/config.toml` | Codex CLI model + flags | — |
-| `.gemini/settings.json` | Gemini CLI model + flags | — |
-
-## CLAUDE.md — 3-Zone architecture
-
-| Zone | Contents | Update policy |
-|------|----------|---------------|
-| **A** (above `@orchestra:template-boundary`) | Orchestration rules, routing policy, delegation triggers, quality gates, language protocol | Stable. Updated only by template version bump |
-| **B** (between the two boundary markers) | Project-specific config: markets, data sources, execution platform, key commands | Set by `/init-finance`. Manually editable |
-| **C** (below `@orchestra:repo-boundary`) | Active work context, design decisions log | Updated dynamically per session; trimmed by `/checkpointing` when >50 lines |
-
-## Language protocol
-
-| Channel | Language |
-|---|---|
-| Orchestrator ↔ User | Japanese (default) |
-| Agent ↔ Agent / Codex / Gemini | English (fixed) |
-| Code / commit messages / docs | English (fixed) |
+- Legacy provider directories
+- Legacy role-agent directories
+- Keyword routing configuration
 
 ## Provenance
 
-Financial-trading specialization. The full-stack web/mobile sibling is at [`ohayotaro/claude-fullstack-orchestrator`](https://github.com/ohayotaro/claude-fullstack-orchestrator). Both draw structural cues from [`DeL-TaiseiOzaki/claude-code-orchestra`](https://github.com/DeL-TaiseiOzaki/claude-code-orchestra) (multi-agent dev environment) and the rules layout pattern from [`affaan-m/everything-claude-code`](https://github.com/affaan-m/everything-claude-code). Meta-design reviewed by Codex CLI on 2026-05-09 (record at `.claude/docs/reviews/codex-meta-review-2026-05-09.md`).
+Financial-trading specialization. Structural inspiration comes from multi-agent development templates and Claude Code rules-layout patterns, but this repository now uses a Claude PM plus Codex engineering architecture.
 
 ## License
 

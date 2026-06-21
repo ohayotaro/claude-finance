@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+from typing import Any
 
 # Match actual backtest invocations, not any string containing "backtest".
 # These are concrete command fragments that indicate a real run.
@@ -53,7 +54,7 @@ DEFAULT_THRESHOLDS = {
 }
 
 
-def load_thresholds():
+def load_thresholds() -> dict[str, dict[str, object]]:
     """Load thresholds from project config, fall back to defaults."""
     config_path = os.path.join(
         os.environ.get("CLAUDE_PROJECT_DIR", "."),
@@ -68,7 +69,7 @@ def load_thresholds():
         return DEFAULT_THRESHOLDS
 
 
-def handle(data):
+def handle(data: dict[str, Any]) -> str | None:
     """Process a parsed PostToolUse payload.
 
     Returns additionalContext string if backtest detected, None otherwise.
@@ -93,14 +94,15 @@ def handle(data):
     # If the backtest command failed, report failure.
     if exit_code != 0:
         failure_parts = [
-            "BACKTEST FAILED (exit_code=%s). Recommended next steps:" % exit_code,
+            f"BACKTEST FAILED (exit_code={exit_code}). Recommended next steps:",
             "1. Inspect stderr/traceback before any further action.",
-            "2. Delegate root-cause analysis: "
-            '`codex exec --full-auto "Debug backtest failure: {error}"`',
+            "2. Create a task brief with stderr and validation evidence, then run "
+            "`.claude/scripts/codex_handoff.py implement <task-id>` for a T1 fix or "
+            "the full plan/implement/review flow for T2/T3.",
             "3. Do NOT proceed with strategy validation until the failure is resolved.",
         ]
         if stderr:
-            failure_parts.append("\nstderr (first 500 chars):\n%s" % stderr[:500])
+            failure_parts.append(f"\nstderr (first 500 chars):\n{stderr[:500]}")
         return "\n".join(failure_parts)
 
     thresholds = load_thresholds()
@@ -120,22 +122,24 @@ def handle(data):
         pattern = config.get("pattern", "")
         threshold = config.get("threshold", 0)
         comparison = config.get("comparison", "below")
-        message = config.get("message", "%s threshold breached" % metric_name)
+        message = config.get("message", f"{metric_name} threshold breached")
 
         match = re.search(pattern, stdout)
         if match:
             try:
                 value = float(match.group(1))
                 breached = False
-                if comparison == "below" and value < threshold:
-                    breached = True
-                elif comparison == "above" and abs(value) > threshold:
+                if (
+                    comparison == "below"
+                    and value < threshold
+                    or comparison == "above"
+                    and abs(value) > threshold
+                ):
                     breached = True
 
                 if breached:
                     warnings.append(
-                        "WARNING: %s (actual: %.4f, threshold: %s)"
-                        % (message, value, threshold)
+                        f"WARNING: {message} (actual: {value:.4f}, threshold: {threshold})"
                     )
             except (ValueError, IndexError):
                 pass
@@ -143,8 +147,8 @@ def handle(data):
     suggestions = [
         "BACKTEST COMPLETED. Recommended next steps:",
         "1. Review performance metrics against risk-management.md thresholds",
-        "2. Run statistical validation via Codex: "
-        '`codex exec "Validate backtest results: {metrics}"`',
+        "2. Capture metrics in the task brief and run the canonical Codex handoff "
+        "flow for statistical validation.",
         "3. Check for look-ahead bias in strategy code",
         "4. Run Out-of-Sample test if not done",
     ]
@@ -155,7 +159,7 @@ def handle(data):
     return "\n".join(suggestions)
 
 
-def main():
+def main() -> None:
     """Standalone entry point: read JSON from stdin, run handle(), emit result."""
     raw = sys.stdin.read()
     if not raw.strip():

@@ -55,14 +55,14 @@ def main():
             mod = _load_module(mod_name, mod_path)
             if mod is None:
                 print(
-                    "post-bash-dispatcher: WARNING: could not load %s" % mod_path,
+                    f"post-bash-dispatcher: WARNING: could not load {mod_path}",
                     file=sys.stderr,
                 )
                 continue
             handle_fn = getattr(mod, "handle", None)
             if handle_fn is None:
                 print(
-                    "post-bash-dispatcher: WARNING: no handle() in %s" % mod_path,
+                    f"post-bash-dispatcher: WARNING: no handle() in {mod_path}",
                     file=sys.stderr,
                 )
                 continue
@@ -73,8 +73,7 @@ def main():
             # Isolate failures: one handler raising must not prevent others
             tb_line = traceback.format_exc().splitlines()[-1]
             print(
-                "post-bash-dispatcher: WARNING: %s raised: %s"
-                % (mod_name, tb_line),
+                f"post-bash-dispatcher: WARNING: {mod_name} raised: {tb_line}",
                 file=sys.stderr,
             )
 

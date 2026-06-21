@@ -166,7 +166,7 @@ draft  →  testnet  →  live  →  deprecated  →  retired
 `/bot-deploy` MUST verify ALL of the following before transitioning a strategy to `live`:
 1. Testnet validation evidence present (e.g., last 7 days of `/backtest` or testnet logs).
 2. `MAX_POSITION_SIZE`, `MAX_DAILY_LOSS` set in the per-strategy config.
-3. Stop loss implemented (verified by `/team-review` or equivalent).
+3. Stop loss implemented (verified by `/codex-review` or equivalent evidence).
 4. KillSwitch end-to-end test passed.
 5. Notification webhook smoke test passed.
 6. `/risk-report` generated within last 7 days for this `strategy_id`.
@@ -308,7 +308,7 @@ When importing an existing single-strategy project:
 2. Move config / state / logs into the per-strategy directories.
 3. Wrap existing state access through `StateStore`.
 4. Update deployment to per-strategy container.
-5. Verify with `/team-review` before promoting to `live`.
+5. Verify with `/codex-review` before promoting to `live`.
 
 ## 10. Runtime Control-Plane Semantics
 

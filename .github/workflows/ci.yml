@@ -20,16 +20,16 @@ jobs:
           version: "0.7.12"
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --extra dev
 
       - name: Ruff check
-        run: uv run ruff check src/ tests/
+        run: uv run --extra dev ruff check src/ tests/ .claude/hooks/ .claude/scripts/
 
       - name: Mypy
-        run: uv run mypy src/
+        run: uv run --extra dev mypy src/ .claude/scripts/
 
       - name: Pytest (fast)
-        run: uv run pytest -m "not integration and not slow"
+        run: uv run --extra dev pytest -m "not integration and not slow"
 
   registry-audit:
     name: Registry audit
@@ -61,7 +61,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.changes.outputs.touched == 'true'
-        run: uv sync --frozen
+        run: uv sync --frozen --extra dev
 
       - name: Run registry audit
         if: steps.changes.outputs.touched == 'true'

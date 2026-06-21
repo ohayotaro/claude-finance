@@ -26,7 +26,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 LIVE_PATTERNS = [
     r"\bBOT_MODE\s*=\s*['\"]?live\b",
@@ -82,13 +82,13 @@ See .claude/rules/security.md "Live-trading acknowledgment" for rationale.
 def acknowledgment_valid(state_dir: str) -> bool:
     if not os.path.isdir(state_dir):
         return False
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    cutoff = datetime.now(UTC) - timedelta(hours=24)
     for entry in os.listdir(state_dir):
         if not (entry.startswith("live-trading-") and entry.endswith(".ack")):
             continue
         full = os.path.join(state_dir, entry)
         try:
-            mtime = datetime.fromtimestamp(os.path.getmtime(full), tz=timezone.utc)
+            mtime = datetime.fromtimestamp(os.path.getmtime(full), tz=UTC)
         except OSError:
             continue
         if mtime >= cutoff:

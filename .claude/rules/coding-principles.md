@@ -32,7 +32,7 @@ def _validate_data(self) -> None: ...
 ### External API Integration (Mandatory)
 When implementing any client that connects to an external API:
 1. **Research the official API documentation first** — do not guess endpoints, auth, rate limits, or response formats
-2. Use Gemini CLI to fetch documentation if official docs are not locally available
+2. If official docs are not already available locally, record the need for network research in the task brief and obtain explicit handling before implementation
 3. Document the API specification in `src/data/api_specs/{service_name}.md` before writing any client code
 4. Verify: base URL, authentication method, endpoint paths, rate limits, pagination, response schema, error codes
 5. Implementation must match the documented specification — no assumed behavior

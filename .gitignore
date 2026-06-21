@@ -30,6 +30,8 @@ htmlcov/
 # Claude Code logs and local state
 .claude/logs/
 .claude/checkpoints/
+.claude/tasks/
+.claude/plans/
 .claude/state/
 .claude/settings.local.json
 

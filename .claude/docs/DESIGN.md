@@ -1,72 +1,82 @@
-# Architecture Design Document
+# Architecture Design Record
 
-## System Overview
+## Current Architecture
 
-This project is an AI-orchestrated financial trading system that coordinates three AI agents:
+This repository uses a two-provider architecture:
 
-```
-┌─────────────────────────────────────────────────┐
-│                   Claude Code                    │
-│              ── Orchestrator ──                  │
-│  Delegates, integrates, does NOT implement       │
-├─────────────┬─────────────┬─────────────────────┤
-│  Subagents  │  Codex CLI  │    Gemini CLI       │
-│             │             │                     │
-│ - Codebase  │ - Design    │ - Chart analysis    │
-│ - Review    │ - Debug     │ - PDF extraction    │
-│ - Docs      │ - Algorithm │ - Research          │
-│ - Tests     │ - Stats     │ - Visualization     │
-└─────────────┴─────────────┴─────────────────────┘
+```text
+Claude Opus  -> PM, Japanese user interaction, neutral task brief, risk tier, approvals, acceptance
+Codex        -> technical lead, repository exploration, design, implementation, tests, independent review
 ```
 
-## Specialized Team Agents
+Substantial work is represented by `.claude/tasks/<task-id>/brief.md` and executed through `.claude/scripts/codex_handoff.py`. Planning and review use read-only Codex invocations. Implementation uses workspace-write. The runner centralizes Codex flags, phase prompts, result artifacts, JSONL event logs, and Git metadata.
 
-| Agent | Domain | File Scope |
-|-------|--------|------------|
-| data-engineer | Market data pipelines | src/data/* |
-| quant-analyst | Backtesting, statistics, risk | src/backtesting/*, src/risk/* |
-| strategist | Trade logic, signals | src/strategies/* |
-| ea-developer | MQL5 Expert Advisors | mql5/* |
-| bot-engineer | API-based Python trading bots (ccxt, WebSocket) | src/bot/* |
-| infra-ops | Deployment, Docker, monitoring, dashboards | docker/*, deploy configs, src/monitoring/* |
-| ml-engineer | ML model pipelines, feature engineering | src/ml/* (when present) |
-| codex-debugger | Error analysis via Codex | (any — via Codex CLI) |
-| general-purpose | Codebase exploration, utilities, tests | src/utils/*, tests/* |
+## Current Decisions
 
-## Skill Pipeline
+### ADR-001: Claude PM + Codex Engineering
 
-```
-/data-pipeline → /strategy-design → /backtest → /optimize → /ea-generate
-     │                  │               │            │            │
-  Fetch data      Design logic     Validate     Tune params   Convert to
-  Clean/store     Define signals   Measure      Walk-forward  MQL5 EA
-                  Set rules        Report       Monte Carlo   Deploy
-```
+- **Status**: Accepted
+- **Decision**: Claude owns PM/change-control duties; Codex owns technical work.
+- **Rationale**: The previous orchestration split created duplicate ownership, high PM context consumption, and non-deterministic delegation. A neutral brief plus phase artifacts makes the handoff auditable and keeps technical decisions in the engineering context.
+- **Consequences**: Claude writes only approved local orchestration artifacts. Codex receives the brief, relevant rules, and phase prerequisites through the central runner.
 
-## Architecture Decisions
+### ADR-002: Risk-Tier Gates
 
-### ADR-001: Orchestrator Pattern
-- **Decision**: Claude Code delegates, does not implement
-- **Rationale**: Conserve 1M context for coordination; leverage specialized models
+- **Status**: Accepted
+- **Decision**: Work is classified T0-T3. T2 requires plan, Claude approval, implementation, and fresh review. T3 adds explicit user approval before implementation or external action.
+- **Rationale**: Financial trading tasks have materially different risk profiles. Tiered gates prevent low-risk documentation work from carrying heavyweight process while keeping live trading, credentials, deployment, migrations, and risk controls fail-closed.
+- **Consequences**: Risk classification is a PM judgment, not a keyword route. Hooks only enforce deterministic constraints.
 
-### ADR-002: Dual Language Stack
-- **Decision**: Python for analysis/backtesting, MQL5 for EA execution
-- **Rationale**: Python has superior data science ecosystem; MQL5 is required for MetaTrader
+### ADR-003: Fresh Review Separation
 
-### ADR-003: Data Format
-- **Decision**: Parquet for storage, DataFrame for processing
-- **Rationale**: Parquet offers columnar compression and fast I/O; pandas/polars interop
+- **Status**: Accepted
+- **Decision**: Medium- and high-risk changes receive a fresh read-only Codex review that does not receive the implementation transcript.
+- **Rationale**: Independent review catches gaps hidden by implementation context and keeps acceptance evidence auditable.
+- **Consequences**: Review may read only the brief, approved plan, implementation result artifact, repository, and diff.
 
-### ADR-004: Hook-Driven Routing
-- **Decision**: Python hooks intercept tool calls to suggest AI routing
-- **Rationale**: Enforcement at tool-call level is more reliable than prompt instructions alone
+### ADR-004: Multi-Strategy As First-Class Runtime
 
-### ADR-005: Multi-Strategy as First-Class Concern (2026-05-14)
-- **Decision**: Scaffolded projects treat strategies as first-class, isolated, registry-managed units. Identity is a `strategy_id` of the form `<venue>.<market>.<logic_slug>.<symbol>.<timeframe>.v<major>`. The canonical source of truth is `config/registry.toml`, written only by `/strategy-register`. Default runtime model is one process / container per strategy with per-strategy config, SQLite, and JSONL log.
-- **Rationale**: The previous implicit model ("one project = one strategy") forced file rewrites whenever a new strategy was added or switched, broke audit trails, and made cross-strategy risk impossible to enforce. A registry-driven model lets the orchestrator scaffold N strategies without touching each other's files, gives a deterministic MagicNumber allocation for MQL5, and creates the seam needed for a cross-strategy risk aggregator service.
-- **Skills affected**: new `/strategy-register`; `init-finance`, `strategy-design`, `bot-develop`, `ea-generate`, `bot-deploy`, `bot-monitor`, `risk-report` updated to consume / write registry. Contract lives in `.claude/rules/multi-strategy.md`.
-- **MagicNumber allocation**: range `20_000_000`-`89_999_999` reserved for orchestrator. Initial candidate is `20M + (crc32(strategy_id) mod 70M)`; on collision the `magic_salt` field is incremented and the hash recomputed. Final value is frozen in the registry; EA reads it from a `.set` preset rather than hardcoding.
-- **Risk aggregation**: separate `src/risk/aggregator.py` service, scoped per `risk_group`, reconciling against exchange/broker state every 60s. Soft cap freezes new entries across the group; hard cap flatten-and-halts.
-- **Forward compatibility**: per-strategy SQLite is the default backend behind the `StateStore` protocol; future migration to a central operational DB (e.g. PostgreSQL) is possible without changing skill contracts, as long as bots respect the protocol.
-- **Lifecycle gates**: `draft -> testnet -> live -> deprecated -> retired`, no backward transitions. Only `/bot-deploy` may promote to `live`, after the six preconditions defined in `multi-strategy.md` section 4. The daily live-trading acknowledgment in `.claude/state/live-trading-*.ack` remains an independent human gate enforced by the existing hook.
-- **Open follow-ups**: schema migration policy when `registry.toml` `schema_version` is bumped; CI audit step (`/strategy-register audit`) wiring; reference implementation of `src/orchestrator/registry.py` and `src/risk/aggregator.py` (currently scaffolded as stubs by `/init-finance`).
+- **Status**: Accepted
+- **Decision**: Strategies are registry-managed, isolated units. `config/registry.toml` owns `strategy_id`, lifecycle state, runtime, paths, risk group, account scope, and MQL5 MagicNumber allocation.
+- **Rationale**: One project may host multiple strategies without rewriting shared files. Registry isolation enables per-strategy configs/state/logs/reports and cross-strategy risk aggregation.
+- **Consequences**: `src/orchestrator/registry.py` and `src/risk/aggregator.py` are financial runtime code with tests and must not be changed unless a task explicitly requires it.
+
+## Superseded History
+
+### ADR-S1: Three-Provider Orchestration
+
+- **Status**: Superseded
+- **Former decision**: Claude coordinated Codex CLI, Gemini CLI, and role-based Opus agents.
+- **Reason superseded**: The architecture duplicated ownership, increased always-loaded context, and made responsibility boundaries unclear. Multimodal extraction and role-agent coordination are no longer active architecture.
+
+### ADR-S2: Hook Keyword Routing
+
+- **Status**: Superseded
+- **Former decision**: Prompt and tool hooks used keyword routing to suggest provider or role assignment.
+- **Reason superseded**: Risk tier and acceptance criteria are PM judgments. Deterministic hooks should enforce safety and integrity only, not infer technical ownership.
+
+### ADR-S3: Inline Codex Prompt Templates
+
+- **Status**: Superseded
+- **Former decision**: Skills and documents embedded many one-off Codex command templates.
+- **Reason superseded**: Centralizing prompt assembly in `.claude/scripts/codex_handoff.py` prevents drift, allows tests for safe flags, and preserves phase isolation.
+
+## Financial Safety Contracts
+
+- No look-ahead bias.
+- Explicit transaction costs, spread, commission, and slippage.
+- In-sample and out-of-sample separation.
+- Stop loss, daily loss, drawdown, kill switch, and cross-strategy risk controls.
+- UTC/timezone correctness.
+- Appropriate numerical precision for financial calculations.
+- Regression tests for financial logic changes.
+
+## Deterministic Hooks
+
+- `pm-write-guard.py`: blocks Claude source/config writes outside allowed PM artifact paths.
+- `live-trading-gate.py`: blocks live-trading Bash commands unless kill switch is clear and a fresh acknowledgment exists.
+- `post-bash-dispatcher.py`: runs concise post-command detectors and telemetry.
+- `error-to-codex.py`: points failures to the canonical task/debug flow.
+- `post-backtest-analysis.py`: detects real backtest failures and metric threshold warnings.
+- `post-bot-execution.py`: detects bot execution and connectivity incidents.
+- `log-cli-tools.py`: logs minimal Codex metadata without raw prompts or command bodies.
