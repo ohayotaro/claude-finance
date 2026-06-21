@@ -75,6 +75,10 @@ VENUE_CLIENT_ALLOWED_PREFIXES: tuple[str, ...] = ("src.risk.",)
 # Maximum bytes to read from a single strategy log per cycle (MEDIUM-G).
 LOG_READ_CHUNK_SIZE: int = 4 * 1024 * 1024  # 4 MB
 
+LIVE_CAPABLE_STATES: frozenset[StrategyState] = frozenset(
+    {StrategyState.LIVE, StrategyState.TESTNET}
+)
+
 
 # ---------------------------------------------------------------------------
 # Venue contract (Protocol so tests can stub)
@@ -120,7 +124,7 @@ class VenueClient(Protocol):
 
 
 class NullVenueClient:
-    """Returns empty data. Used when no real venue integration is wired up."""
+    """Returns empty non-authoritative data for test/development setups only."""
 
     def fetch_account_snapshot(self, account_scope: str) -> VenueAccountSnapshot:
         return VenueAccountSnapshot(
@@ -364,12 +368,39 @@ def load_group_strategies(
     registry_doc: RegistryDocument, risk_group: str
 ) -> list[StrategyEntry]:
     """Strategies in this risk_group that are actively trading."""
-    active = {StrategyState.TESTNET, StrategyState.LIVE}
     return [
         e
         for e in registry_doc.strategies
-        if e.risk_group == risk_group and e.state in active and e.enabled
+        if e.risk_group == risk_group and e.state in LIVE_CAPABLE_STATES and e.enabled
     ]
+
+
+def _is_null_venue_client(client: VenueClient) -> bool:
+    return isinstance(client, NullVenueClient)
+
+
+def _live_capable_group_strategies(
+    registry_doc: RegistryDocument, risk_group: str
+) -> list[StrategyEntry]:
+    """All live/testnet entries in a risk group, independent of enabled."""
+    return [
+        e
+        for e in registry_doc.strategies
+        if e.risk_group == risk_group and e.state in LIVE_CAPABLE_STATES
+    ]
+
+
+def _log_null_venue_live_capable_refusal(
+    risk_group: str, strategies: Sequence[StrategyEntry]
+) -> None:
+    strategy_states = ", ".join(f"{entry.id}:{entry.state.value}" for entry in strategies)
+    logger.critical(
+        "refusing to start risk aggregator for risk_group=%s with NullVenueClient: "
+        "live-capable strategies require authoritative venue reconciliation "
+        "(strategy_states=%s)",
+        risk_group,
+        strategy_states,
+    )
 
 
 def read_strategy_log_delta(
@@ -524,6 +555,7 @@ def reconcile_once(
     if now_utc is None:
         now_utc = datetime.now(UTC)
     _check_day_boundary(state, now_utc.date())
+    using_null_venue = _is_null_venue_client(client)
 
     strategy_ids = [s.id for s in strategies]
     try:
@@ -621,6 +653,9 @@ def reconcile_once(
         total_unrealized = sum(state.latest_unrealized.values(), Decimal("0"))
     state.group_daily_pnl = state.daily_realized_pnl + total_unrealized
     determine_signals(state, config)
+    if using_null_venue:
+        state.fail_closed = True
+        state.last_success_ts = None
     return state
 
 
@@ -870,6 +905,13 @@ def run_forever(
             time.sleep(min(config.poll_interval_s, 5.0))
             iterations += 1
             continue
+        live_capable = _live_capable_group_strategies(doc, config.risk_group)
+        if _is_null_venue_client(client) and live_capable:
+            _log_null_venue_live_capable_refusal(config.risk_group, live_capable)
+            state.fail_closed = True
+            publish_state(state_path, state, config)
+            save_checkpoint(checkpoint_path, state, log_statuses)
+            return int(ExitCode.INVARIANT_VIOLATION)
         strategies = load_group_strategies(doc, config.risk_group)
         state = reconcile_once(client, config, strategies, state, log_statuses, project_root)
         publish_state(state_path, state, config)
@@ -973,6 +1015,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         doc = load_registry(registry_path)
     except Exception as exc:
         logger.error("registry load failed at startup: %s", exc)
+        return int(ExitCode.INVARIANT_VIOLATION)
+    live_capable = _live_capable_group_strategies(doc, config.risk_group)
+    if _is_null_venue_client(client) and live_capable:
+        _log_null_venue_live_capable_refusal(config.risk_group, live_capable)
         return int(ExitCode.INVARIANT_VIOLATION)
     for entry in load_group_strategies(doc, config.risk_group):
         try:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from src.orchestrator.registry import (
+    ExitCode,
     RegistryDefaults,
     RegistryDocument,
     Runtime,
@@ -35,6 +37,7 @@ from src.risk.aggregator import (
     load_checkpoint,
     load_group_strategies,
     load_venue_client,
+    main,
     publish_state,
     read_strategy_log_delta,
     reconcile_once,
@@ -96,6 +99,29 @@ def _default_config(risk_group: str = "crypto-main") -> AggregatorConfig:
         malformed_log_quarantine_per_minute=100,
         health_window_s=120.0,
     )
+
+
+def _write_registry(tmp_path: Path, entries: Sequence[StrategyEntry]) -> Path:
+    doc = RegistryDocument(
+        schema_version=1,
+        defaults=RegistryDefaults(),
+        accounts=[],
+        strategies=list(entries),
+    )
+    registry_path = tmp_path / "config" / "registry.toml"
+    atomic_replace(registry_path, dump_registry(doc))
+    return registry_path
+
+
+def _write_risk_group_config(tmp_path: Path, risk_group: str = "crypto-main") -> Path:
+    config_path = tmp_path / "config" / "risk_groups.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        f"[risk_groups.{risk_group}]\n"
+        'account_scope = "binance-main"\n'
+        "poll_interval_s = 0.05\n",
+    )
+    return config_path
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +424,23 @@ def test_reconcile_happy_path_resets_failures(tmp_path: Path) -> None:
     assert state.last_success_ts is not None
 
 
+def test_null_venue_client_reconcile_is_unhealthy_fail_closed(tmp_path: Path) -> None:
+    config = _default_config()
+    client = NullVenueClient()
+    state = AggregatorState(risk_group=config.risk_group)
+    state.last_success_ts = datetime.now(UTC)
+    state.fail_closed = False
+    log_statuses: dict[str, StrategyLogStatus] = {}
+
+    state = reconcile_once(client, config, [], state, log_statuses, tmp_path)
+    data = state_to_dict(state, config)
+
+    assert state.fail_closed is True
+    assert state.last_success_ts is None
+    assert data["fail_closed"] is True
+    assert data["healthy"] is False
+
+
 # ---------------------------------------------------------------------------
 # CRITICAL-A: Daily PnL accounting
 # ---------------------------------------------------------------------------
@@ -645,7 +688,7 @@ def test_restart_loads_checkpoint_no_replay(tmp_path: Path) -> None:
     )
 
     config = _default_config()
-    client = NullVenueClient()
+    client = StubVenueClient(snapshot=_snapshot())
 
     # First run: 1 iteration.
     stop = threading.Event()
@@ -779,6 +822,114 @@ def test_run_forever_two_iterations_with_stub(tmp_path: Path) -> None:
     data = json.loads(state_path.read_text())
     # After max_iterations the loop publishes a shutdown state with fail_closed=True.
     assert data["fail_closed"] is True
+
+
+def test_run_forever_refuses_null_venue_for_live_capable_strategy(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    entry = _make_entry("binance.swap.x.btc.5m.v1", enabled=False)
+    registry_path = _write_registry(tmp_path, [entry])
+    config = _default_config()
+    caplog.set_level(logging.CRITICAL, logger="aggregator")
+
+    rc = run_forever(
+        config,
+        registry_path,
+        tmp_path,
+        NullVenueClient(),
+        stop_event=threading.Event(),
+        max_iterations=1,
+    )
+
+    assert rc == int(ExitCode.INVARIANT_VIOLATION)
+    assert any(
+        record.levelno == logging.CRITICAL
+        and "NullVenueClient" in record.getMessage()
+        and entry.id in record.getMessage()
+        for record in caplog.records
+    )
+    state_path = tmp_path / "data" / "aggregator" / config.risk_group / "state.json"
+    data = json.loads(state_path.read_text())
+    assert data["healthy"] is False
+    assert data["fail_closed"] is True
+
+
+@pytest.mark.parametrize("state", [StrategyState.LIVE, StrategyState.TESTNET])
+def test_main_refuses_null_venue_for_live_capable_strategy(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    state: StrategyState,
+) -> None:
+    entry = _make_entry("binance.swap.x.btc.5m.v1", state=state, enabled=False)
+    registry_path = _write_registry(tmp_path, [entry])
+    config_path = _write_risk_group_config(tmp_path)
+    caplog.set_level(logging.CRITICAL, logger="aggregator")
+
+    rc = main([
+        "--risk-group",
+        "crypto-main",
+        "--project-root",
+        str(tmp_path),
+        "--registry",
+        str(registry_path),
+        "--config",
+        str(config_path),
+    ])
+
+    assert rc == int(ExitCode.INVARIANT_VIOLATION)
+    assert any(
+        record.levelno == logging.CRITICAL
+        and "NullVenueClient" in record.getMessage()
+        and f"{entry.id}:{state.value}" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_main_allows_null_venue_for_draft_strategies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry = _make_entry(
+        "binance.swap.x.btc.5m.v1",
+        state=StrategyState.DRAFT,
+        enabled=False,
+    )
+    registry_path = _write_registry(tmp_path, [entry])
+    config_path = _write_risk_group_config(tmp_path)
+    called: dict[str, object] = {}
+
+    def fake_run_forever(
+        config: AggregatorConfig,
+        registry_path: Path,
+        project_root: Path,
+        client: NullVenueClient,
+        stop_event: threading.Event,
+    ) -> int:
+        called["config"] = config
+        called["registry_path"] = registry_path
+        called["project_root"] = project_root
+        called["client"] = client
+        called["stop_event"] = stop_event
+        return int(ExitCode.OK)
+
+    monkeypatch.setattr("src.risk.aggregator.run_forever", fake_run_forever)
+
+    rc = main([
+        "--risk-group",
+        "crypto-main",
+        "--project-root",
+        str(tmp_path),
+        "--registry",
+        str(registry_path),
+        "--config",
+        str(config_path),
+    ])
+
+    assert rc == int(ExitCode.OK)
+    assert called["config"].risk_group == "crypto-main"
+    assert called["registry_path"] == registry_path
+    assert called["project_root"] == tmp_path.resolve()
+    assert isinstance(called["client"], NullVenueClient)
+    assert isinstance(called["stop_event"], threading.Event)
 
 
 def test_null_venue_client_protocol_compatible() -> None:
