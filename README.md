@@ -67,11 +67,13 @@ All substantial work starts from a canonical task directory:
 
 ```text
 .claude/tasks/<task-id>/
-├── brief.md       # Claude PM owns
-├── plan.md        # Codex plan output
-├── approval.md    # Claude PM approval for T2/T3
-├── result.md      # Codex implementation output
-└── review.md      # fresh Codex review output
+├── brief.md                  # Claude PM owns
+├── plan.md                   # Codex plan output
+├── approval.md               # Claude PM approval for T2/T3
+├── implementation-result.md  # Codex implementation output
+├── review.md                 # fresh Codex review output
+├── state.json                # phase lifecycle, model/effort, git metadata
+└── codex-events.jsonl        # consolidated phase event log
 ```
 
 Run phases through the central runner:
@@ -80,6 +82,9 @@ Run phases through the central runner:
 python3 .claude/scripts/codex_handoff.py plan <task-id>
 python3 .claude/scripts/codex_handoff.py implement <task-id>
 python3 .claude/scripts/codex_handoff.py review <task-id>
+python3 .claude/scripts/codex_handoff.py status <task-id>
+python3 .claude/scripts/codex_handoff.py collect <task-id>
+python3 .claude/scripts/codex_handoff.py cancel <task-id>
 ```
 
 Risk tiers:
@@ -125,12 +130,14 @@ Skills are PM intake workflows. They gather domain inputs, add acceptance criter
 
 Claude is intentionally not the engineering worker. It keeps the conversation with the user, classifies risk, creates neutral briefs, approves Codex plans, and accepts or rejects based on evidence.
 
-Codex performs repository exploration, design, implementation, tests, debugging, and independent review. Planning and review run read-only. Implementation runs workspace-write. The runner uses stdin prompts, strict config, non-interactive approval behavior, ephemeral invocations, result artifacts, JSONL event logs, and Git metadata.
+Codex performs repository exploration, design, implementation, tests, debugging, and independent review. Planning and review run read-only. Implementation runs workspace-write. The runner tracks phase state in `state.json`, emits consolidated events to `codex-events.jsonl`, and supports lifecycle commands (status, collect, cancel). Plan runs foreground; implement and review run as background processes via Claude Code `run_in_background`.
+
+Model and reasoning effort are phase-aware with four-level precedence: CLI flag, phase-specific env var (`CODEX_PLAN_MODEL`, `CODEX_PLAN_EFFORT`, etc.), general env var (`CODEX_MODEL`, `CODEX_EFFORT`), or built-in defaults. T3 tasks fail-closed at `xhigh` effort minimum.
 
 Hooks are deterministic only:
 
 - `pm-write-guard.py` blocks Claude source/config writes outside PM artifact paths.
-- `live-trading-gate.py` keeps live execution fail-closed without a fresh acknowledgment.
+- `live-trading-gate.py` keeps live execution fail-closed without a fresh acknowledgment and enforces per-strategy KillSwitch (`data/KILL.{strategy_id}`).
 - `post-bash-dispatcher.py` runs concise Bash telemetry and error/backtest/bot incident detectors.
 
 ## Updating The Template
