@@ -169,7 +169,7 @@ draft  →  testnet  →  live  →  deprecated  →  retired
 3. Stop loss implemented (verified by `/codex-review` or equivalent evidence).
 4. KillSwitch end-to-end test passed.
 5. Notification webhook smoke test passed.
-6. `/risk-report` generated within last 7 days for this `strategy_id`.
+6. Per-strategy risk limits (`max_position_size`, `max_daily_loss_pct`, `stop_loss_pct`) configured with non-zero values.
 
 These mirror the existing live-trading gate (`security.md`), but are now per-strategy.
 

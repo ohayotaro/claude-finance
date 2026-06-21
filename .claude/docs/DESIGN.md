@@ -46,7 +46,7 @@ Substantial work is represented by `.claude/tasks/<task-id>/brief.md` and execut
 ### ADR-S1: Three-Provider Orchestration
 
 - **Status**: Superseded
-- **Former decision**: Claude coordinated Codex CLI, Gemini CLI, and role-based Opus agents.
+- **Former decision**: Claude coordinated Codex CLI, a multimodal CLI, and role-based Opus agents.
 - **Reason superseded**: The architecture duplicated ownership, increased always-loaded context, and made responsibility boundaries unclear. Multimodal extraction and role-agent coordination are no longer active architecture.
 
 ### ADR-S2: Hook Keyword Routing

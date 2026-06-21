@@ -92,7 +92,7 @@ Before acknowledging, confirm ALL of:
   [ ] Stop loss implemented in the strategy code
   [ ] KillSwitch verified (touch data/KILL exits the bot cleanly)
   [ ] Notification webhook smoke-tested
-  [ ] /risk-report generated within the last 7 days
+  [ ] Risk limits configured in per-strategy TOML (MAX_POSITION_SIZE, MAX_DAILY_LOSS set)
 
 When all items are true, acknowledge with:
 

@@ -66,7 +66,7 @@ Confirm ALL of the following are true for the strategy / bot you are about to ru
 - [ ] Stop loss is implemented in the strategy code (no live trading without SL)
 - [ ] KillSwitch verified end-to-end: `touch data/KILL` causes the bot to exit cleanly
 - [ ] Notification webhook smoke-tested (a test alert reached the channel)
-- [ ] `/risk-report` generated within the last 7 days for this strategy
+- [ ] Risk limits verified in per-strategy config
 
 When everything above is true, acknowledge with:
 

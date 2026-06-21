@@ -19,7 +19,7 @@ Deployment is T3 when it can affect live systems, credentials, infrastructure, e
 
 - AC includes no secrets committed or printed.
 - AC includes testnet validation evidence within 7 days for first live promotion.
-- AC includes `MAX_POSITION_SIZE`, `MAX_DAILY_LOSS`, stop loss, kill switch test, notification smoke test, and recent risk report.
+- AC includes per-strategy config with `MAX_POSITION_SIZE`, `MAX_DAILY_LOSS`, and `stop_loss_pct` set to non-zero values, plus kill switch test and notification smoke test.
 - AC includes per-strategy Docker/systemd/launchd naming and registry-resolved paths.
 - AC includes health checks, logs, rollback, and risk aggregator status.
 - AC states that automated live execution remains prohibited.

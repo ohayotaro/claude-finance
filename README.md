@@ -118,10 +118,11 @@ Project code (`src/`, `mql5/`, `tests/`, `data/`, `reports/`, etc.) is left alon
 ## Skill Pipelines
 
 ```text
-Strategy:    /data-pipeline -> /strategy-design -> /backtest -> /optimize -> /ea-generate
-API Bot:     /data-pipeline -> /strategy-design -> /backtest -> /optimize -> /bot-develop -> /bot-deploy -> /bot-monitor
-Equity:      /equity-screener -> /earnings-calendar -> /sector-analysis -> /ir-analysis -> /strategy-design
-Operations:  /risk-report, /incident-response, /checkpointing, /codex-task, /codex-review
+Strategy:    /data-pipeline -> /strategy-design -> /backtest -> /optimize
+EA:          /strategy-design -> /backtest -> /optimize -> /ea-generate
+Bot:         /data-pipeline -> /strategy-design -> /backtest -> /optimize -> /bot-develop -> /bot-deploy -> /bot-monitor
+ML:          /data-pipeline -> /ml-pipeline -> /backtest
+Operations:  /incident-response, /checkpointing, /codex-task, /codex-review
 ```
 
 Skills are PM intake workflows. They gather domain inputs, add acceptance criteria and checklists to the canonical brief, invoke the central Codex runner, and perform acceptance. They do not own implementation.

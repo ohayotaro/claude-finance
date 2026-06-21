@@ -17,12 +17,12 @@ from pathlib import Path
 import pytest
 
 from src.orchestrator.registry import (
-    AccountEntry,
     DEFAULT_MAGIC_RANGE_END,
     DEFAULT_MAGIC_RANGE_START,
     ENABLEABLE_STATES,
     SAFE_SYMBOL_RE,
     STRATEGY_ID_RE,
+    AccountEntry,
     ExitCode,
     InvariantViolationError,
     LockContentionError,

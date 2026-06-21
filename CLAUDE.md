@@ -85,9 +85,11 @@ uv run --extra dev mypy src/ .claude/scripts/
 ### Skill Pipelines
 
 ```text
-Strategy:    /data-pipeline -> /strategy-design -> /backtest -> /optimize -> /ea-generate
-API Bot:     /data-pipeline -> /strategy-design -> /backtest -> /optimize -> /bot-develop -> /bot-deploy -> /bot-monitor
-Operations:  /incident-response, /risk-report, /checkpointing, /codex-task, /codex-review
+Strategy:    /data-pipeline -> /strategy-design -> /backtest -> /optimize
+EA:          /strategy-design -> /backtest -> /optimize -> /ea-generate
+Bot:         /data-pipeline -> /strategy-design -> /backtest -> /optimize -> /bot-develop -> /bot-deploy -> /bot-monitor
+ML:          /data-pipeline -> /ml-pipeline -> /backtest
+Operations:  /incident-response, /checkpointing, /codex-task, /codex-review
 ```
 
 ### Directory Map
@@ -128,5 +130,5 @@ Current safeguards to preserve:
 - One strategy process/container by default.
 - Per-strategy config, state, logs, and reports.
 - Lifecycle: `draft -> testnet -> live -> deprecated -> retired`, with no backward transitions.
-- Live promotion requires testnet evidence, configured risk limits, stop loss, kill switch test, notification smoke test, and recent risk report.
+- Live promotion requires testnet evidence, configured per-strategy risk limits, stop loss, kill switch test, and notification smoke test.
 - `src/orchestrator/registry.py` and `src/risk/aggregator.py` are implemented runtime code with tests; do not change them unless necessary for validation or tooling.

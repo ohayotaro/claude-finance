@@ -49,13 +49,11 @@ This file is managed by Claude Code's auto memory system. Project-specific guida
 
 **Rule**: Do not duplicate information that exists in CLAUDE.md Zone B/C or DESIGN.md.
 
-### reports/ (Backtest, Risk, IR)
+### reports/ (Backtest)
 
 | Document | Created by | Retention |
 |----------|-----------|-----------|
 | `reports/backtest_*.html` | `/backtest` | Keep all. Compare across strategy versions |
-| `reports/ir/{company}_*.md` | `/ir-analysis` | Keep all. Dated for historical reference |
-| `reports/risk_*.md` | `/risk-report` | Keep latest + archive previous |
 
 ### .claude/docs/incidents/
 
@@ -84,8 +82,6 @@ These events SHOULD trigger document updates (manually, by the orchestrator runn
 /backtest              → reports/ (create)
 /optimize              → reports/ (create), CLAUDE.md Zone C (best params)
 /ea-generate           → DESIGN.md (EA architecture)
-/ir-analysis           → reports/ir/ (create)
-/risk-report           → reports/ (create)
 /incident-response     → .claude/docs/incidents/ (create)
 /checkpointing         → CLAUDE.md Zone C (summarize + trim)
 /data-pipeline Step 2  → src/data/api_specs/ (create or update)
