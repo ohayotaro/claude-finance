@@ -25,7 +25,24 @@ STATE_KEYS = {
     "git_before",
     "git_after",
     "result_path",
+    "requested_model",
+    "resolved_model",
+    "requested_effort",
+    "resolved_effort",
+    "selection_source",
 }
+SELECTION_ENV_VARS = (
+    "CODEX_PLAN_MODEL",
+    "CODEX_PLAN_EFFORT",
+    "CODEX_IMPLEMENT_MODEL",
+    "CODEX_IMPLEMENT_EFFORT",
+    "CODEX_REVIEW_MODEL",
+    "CODEX_REVIEW_EFFORT",
+    "CODEX_MODEL",
+    "CODEX_EFFORT",
+    "CODEX_FAST_MODEL",
+    "CODEX_HANDOFF_MODEL",
+)
 
 
 def load_handoff() -> ModuleType:
@@ -37,6 +54,12 @@ def load_handoff() -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.fixture(autouse=True)
+def clear_codex_selection_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in SELECTION_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
 
 
 def make_task(root: Path, tier: str = "T1", extra: str = "") -> Path:
@@ -100,17 +123,24 @@ def test_resolve_task_dir_rejects_traversal(tmp_path: Path) -> None:
         handoff.resolve_task_dir(str(outside), tmp_path)
 
 
-def test_codex_command_flags_by_phase(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_codex_command_flags_by_phase(tmp_path: Path) -> None:
     handoff = load_handoff()
-    monkeypatch.setenv("CODEX_HANDOFF_MODEL", "test-model")
+    selection = handoff.ModelEffortSelection(
+        requested_model="test-model",
+        resolved_model="test-model",
+        requested_effort="high",
+        resolved_effort="high",
+        selection_source={"model": "cli", "effort": "cli"},
+    )
 
-    plan = handoff.build_codex_command("plan", tmp_path, tmp_path / "plan.md")
+    plan = handoff.build_codex_command("plan", tmp_path, tmp_path / "plan.md", selection)
     implement = handoff.build_codex_command(
         "implement",
         tmp_path,
         tmp_path / "implementation-result.md",
+        selection,
     )
-    review = handoff.build_codex_command("review", tmp_path, tmp_path / "review.md")
+    review = handoff.build_codex_command("review", tmp_path, tmp_path / "review.md", selection)
 
     assert plan[0:2] == ["codex", "exec"]
     assert "--strict-config" in plan
@@ -123,11 +153,215 @@ def test_codex_command_flags_by_phase(tmp_path: Path, monkeypatch: pytest.Monkey
     deprecated_approval_flag = "--ask-for-" + "approval"
     assert deprecated_approval_flag not in plan
     assert "--model" in plan
+    assert plan[plan.index("--model") + 1] == "test-model"
+    assert plan[plan.index("-c") + 1] == 'model_reasoning_effort="high"'
 
     joined = " ".join(plan + implement + review)
     assert "--full" + "-auto" not in joined
     assert "--" + "yolo" not in joined
     assert "danger-" + "full-access" not in joined
+
+
+def test_omitted_model_is_not_passed_to_codex_command(tmp_path: Path) -> None:
+    handoff = load_handoff()
+    selection = handoff.resolve_model_effort(
+        "plan",
+        "T1",
+        cli_model=None,
+        cli_effort=None,
+        environ={},
+    )
+
+    command = handoff.build_codex_command("plan", tmp_path, tmp_path / "plan.md", selection)
+
+    assert selection.requested_model is None
+    assert selection.selection_source["model"] == "omitted"
+    assert "--model" not in command
+    assert command[command.index("-c") + 1] == 'model_reasoning_effort="medium"'
+
+
+def test_model_precedence_cli_phase_env_general_env_omit() -> None:
+    handoff = load_handoff()
+    env = {"CODEX_MODEL": "general-model", "CODEX_PLAN_MODEL": "phase-model"}
+
+    cli_selection = handoff.resolve_model_effort("plan", "T2", "cli-model", None, env)
+    phase_selection = handoff.resolve_model_effort("plan", "T2", None, None, env)
+    general_selection = handoff.resolve_model_effort(
+        "review",
+        "T2",
+        None,
+        None,
+        {"CODEX_MODEL": "general-model"},
+    )
+    omitted_selection = handoff.resolve_model_effort("review", "T2", None, None, {})
+
+    assert cli_selection.requested_model == "cli-model"
+    assert cli_selection.selection_source["model"] == "cli"
+    assert phase_selection.requested_model == "phase-model"
+    assert phase_selection.selection_source["model"] == "phase_env"
+    assert general_selection.requested_model == "general-model"
+    assert general_selection.selection_source["model"] == "general_env"
+    assert omitted_selection.requested_model is None
+    assert omitted_selection.selection_source["model"] == "omitted"
+
+
+@pytest.mark.parametrize(
+    ("phase", "env_name"),
+    [
+        ("plan", "CODEX_PLAN_MODEL"),
+        ("implement", "CODEX_IMPLEMENT_MODEL"),
+        ("review", "CODEX_REVIEW_MODEL"),
+    ],
+)
+def test_phase_model_env_overrides_general_env(phase: str, env_name: str) -> None:
+    handoff = load_handoff()
+    selection = handoff.resolve_model_effort(
+        phase,
+        "T2",
+        None,
+        None,
+        {"CODEX_MODEL": "general-model", env_name: "phase-model"},
+    )
+
+    assert selection.requested_model == "phase-model"
+    assert selection.selection_source["model"] == "phase_env"
+
+
+def test_effort_precedence_cli_phase_env_general_env_default() -> None:
+    handoff = load_handoff()
+    env = {"CODEX_EFFORT": "medium", "CODEX_PLAN_EFFORT": "high"}
+
+    cli_selection = handoff.resolve_model_effort("plan", "T2", None, "low", env)
+    phase_selection = handoff.resolve_model_effort("plan", "T2", None, None, env)
+    general_selection = handoff.resolve_model_effort(
+        "review",
+        "T2",
+        None,
+        None,
+        {"CODEX_EFFORT": "medium"},
+    )
+    default_selection = handoff.resolve_model_effort("review", "T2", None, None, {})
+
+    assert cli_selection.requested_effort == "low"
+    assert cli_selection.selection_source["effort"] == "cli"
+    assert phase_selection.requested_effort == "high"
+    assert phase_selection.selection_source["effort"] == "phase_env"
+    assert general_selection.requested_effort == "medium"
+    assert general_selection.selection_source["effort"] == "general_env"
+    assert default_selection.requested_effort == "high"
+    assert default_selection.selection_source["effort"] == "default_matrix"
+
+
+@pytest.mark.parametrize(
+    ("phase", "env_name"),
+    [
+        ("plan", "CODEX_PLAN_EFFORT"),
+        ("implement", "CODEX_IMPLEMENT_EFFORT"),
+        ("review", "CODEX_REVIEW_EFFORT"),
+    ],
+)
+def test_phase_effort_env_overrides_general_env(phase: str, env_name: str) -> None:
+    handoff = load_handoff()
+    selection = handoff.resolve_model_effort(
+        phase,
+        "T2",
+        None,
+        None,
+        {"CODEX_EFFORT": "medium", env_name: "high"},
+    )
+
+    assert selection.requested_effort == "high"
+    assert selection.selection_source["effort"] == "phase_env"
+
+
+@pytest.mark.parametrize(
+    ("tier", "expected_effort"),
+    [
+        ("T0", "medium"),
+        ("T1", "medium"),
+        ("T2", "high"),
+        ("T3", "xhigh"),
+    ],
+)
+@pytest.mark.parametrize("phase", ["plan", "implement", "review"])
+def test_default_effort_matrix(phase: str, tier: str, expected_effort: str) -> None:
+    handoff = load_handoff()
+    selection = handoff.resolve_model_effort(phase, tier, None, None, {})
+
+    assert selection.requested_effort == expected_effort
+    assert selection.resolved_effort == expected_effort
+    assert selection.selection_source["effort"] == "default_matrix"
+
+
+def test_t3_effort_fails_closed_unless_cli_overrides() -> None:
+    handoff = load_handoff()
+
+    default_selection = handoff.resolve_model_effort("plan", "T3", None, None, {})
+    assert default_selection.requested_effort == "xhigh"
+
+    with pytest.raises(handoff.HandoffError):
+        handoff.resolve_model_effort("plan", "T3", None, None, {"CODEX_EFFORT": "high"})
+
+    with pytest.raises(handoff.HandoffError):
+        handoff.resolve_model_effort(
+            "plan",
+            "T3",
+            None,
+            None,
+            {"CODEX_PLAN_EFFORT": "high"},
+        )
+
+    cli_selection = handoff.resolve_model_effort(
+        "plan",
+        "T3",
+        None,
+        "high",
+        {"CODEX_PLAN_EFFORT": "xhigh"},
+    )
+    assert cli_selection.requested_effort == "high"
+    assert cli_selection.selection_source["effort"] == "cli"
+
+
+@pytest.mark.parametrize(
+    ("cli_effort", "env"),
+    [
+        ("extreme", {}),
+        (None, {"CODEX_EFFORT": "extreme"}),
+        (None, {"CODEX_PLAN_EFFORT": "extreme"}),
+    ],
+)
+def test_invalid_effort_values_raise_handoff_error(
+    cli_effort: str | None,
+    env: dict[str, str],
+) -> None:
+    handoff = load_handoff()
+
+    with pytest.raises(handoff.HandoffError):
+        handoff.resolve_model_effort("plan", "T2", None, cli_effort, env)
+
+
+def test_codex_handoff_model_is_not_recognized(tmp_path: Path) -> None:
+    handoff = load_handoff()
+    selection = handoff.resolve_model_effort(
+        "plan",
+        "T1",
+        None,
+        None,
+        {"CODEX_HANDOFF_MODEL": "legacy-model"},
+    )
+    command = handoff.build_codex_command("plan", tmp_path, tmp_path / "plan.md", selection)
+
+    assert selection.requested_model is None
+    assert selection.selection_source["model"] == "omitted"
+    assert "--model" not in command
+
+
+def test_parse_args_accepts_model_and_effort() -> None:
+    handoff = load_handoff()
+    args = handoff.parse_args(["plan", "task-1", "--model", "cli-model", "--effort", "high"])
+
+    assert args.model == "cli-model"
+    assert args.effort == "high"
 
 
 def test_implement_requires_approval_for_t2(tmp_path: Path) -> None:
@@ -190,6 +424,14 @@ def test_phase_runs_write_state_and_consolidated_events(
         assert state["git_before"] == GIT_STATE
         assert state["git_after"] == GIT_STATE
         assert str(state["result_path"]).endswith(artifact)
+        assert state["requested_model"] is None
+        assert state["resolved_model"] is None
+        assert state["requested_effort"] == "medium"
+        assert state["resolved_effort"] == "medium"
+        assert state["selection_source"] == {
+            "model": "omitted",
+            "effort": "default_matrix",
+        }
 
     assert not (task_dir / ("result" + ".md")).exists()
     assert not list(task_dir.glob("*.metadata.json"))
@@ -208,6 +450,17 @@ def test_phase_runs_write_state_and_consolidated_events(
         ("review", "started"),
         ("review", "finished"),
     ]
+    started_markers = [marker for marker in markers if marker["marker"] == "started"]
+    assert started_markers
+    for marker in started_markers:
+        assert marker["requested_model"] is None
+        assert marker["resolved_model"] is None
+        assert marker["requested_effort"] == "medium"
+        assert marker["resolved_effort"] == "medium"
+        assert marker["selection_source"] == {
+            "model": "omitted",
+            "effort": "default_matrix",
+        }
 
 
 def test_review_prompt_excludes_implementation_event_log(

@@ -26,6 +26,8 @@ python3 .claude/scripts/codex_handoff.py cancel <task-id>
 
 The runner passes prompts through stdin, uses strict config, isolates phases with ephemeral invocations, uses read-only sandboxing for plan/review, uses workspace-write for implementation, writes `plan.md`, the `implementation-result` Markdown artifact, `review.md`, `state.json`, and an append-only `codex-events.jsonl`, and fails closed on missing prerequisites, empty output, Codex failure, task path traversal, or declared network requirements.
 
+Phase commands accept `--model` and `--effort`. CLI values override phase env vars (`CODEX_PLAN_MODEL`, `CODEX_PLAN_EFFORT`, `CODEX_IMPLEMENT_MODEL`, `CODEX_IMPLEMENT_EFFORT`, `CODEX_REVIEW_MODEL`, `CODEX_REVIEW_EFFORT`), which override general env vars (`CODEX_MODEL`, `CODEX_EFFORT`). If no model is set, the runner omits the model flag. If no effort is set, the runner applies the default effort matrix from the task risk tier and records the source in `state.json` and `codex-events.jsonl`.
+
 Run `implement` and `review` through Claude Code background Bash execution when long-running work should continue asynchronously. The runner itself does not daemonize, detach, kill processes, or manage background PIDs. `status` and `collect` are read-only; `cancel` only marks `state.json` as cancelled.
 
 ## Failure Handling

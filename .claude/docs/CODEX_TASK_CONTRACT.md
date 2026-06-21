@@ -2,7 +2,7 @@
 
 This repository uses a two-provider workflow:
 
-- Claude Opus is the Japanese-speaking PM, change controller, approval gate, and acceptance owner.
+- Claude is the Japanese-speaking PM, change controller, approval gate, and acceptance owner.
 - Codex is the technical lead, codebase explorer, architect, implementer, test executor, and independent reviewer.
 
 Claude creates neutral task artifacts under `.claude/tasks/<task-id>/`. Codex receives those artifacts through `.claude/scripts/codex_handoff.py`.
@@ -110,6 +110,38 @@ python3 .claude/scripts/codex_handoff.py cancel <task-id>
 ```
 
 The runner centralizes Codex flags, uses stdin prompts, strict config, phase-specific sandboxing, non-interactive approval policy, ephemeral invocations, append-only event logs, output files, state tracking, and Git metadata. It never enables network access by default and never uses deprecated automation or sandbox-bypass flags.
+
+### Model And Effort
+
+Phase commands may select a Codex model and reasoning effort without changing prompt content or phase contracts.
+
+Model precedence, highest to lowest:
+
+1. CLI: `--model`
+2. Phase env: `CODEX_PLAN_MODEL`, `CODEX_IMPLEMENT_MODEL`, `CODEX_REVIEW_MODEL`
+3. General env: `CODEX_MODEL`
+4. Optional T0 read-only env: `CODEX_FAST_MODEL`
+5. Omitted model flag, allowing the Codex CLI configured default
+
+Effort precedence, highest to lowest:
+
+1. CLI: `--effort`
+2. Phase env: `CODEX_PLAN_EFFORT`, `CODEX_IMPLEMENT_EFFORT`, `CODEX_REVIEW_EFFORT`
+3. General env: `CODEX_EFFORT`
+4. Default matrix from the brief risk tier
+
+Valid effort values are `minimal`, `low`, `medium`, `high`, and `xhigh`. The runner passes effort with a Codex config override and rejects unknown values before invoking Codex.
+
+| Risk tier | Default effort |
+|---|---|
+| T0 | `medium` |
+| T1 | `medium` |
+| T2 | `high` |
+| T3 | `xhigh` |
+
+T3 tasks fail closed unless the resolved effort is `xhigh`. A lower phase or general env effort is rejected. A lower CLI effort is treated as a deliberate operator override.
+
+`state.json` and phase start markers in `codex-events.jsonl` record `requested_model`, `resolved_model`, `requested_effort`, `resolved_effort`, and `selection_source`.
 
 ### Background Execution
 

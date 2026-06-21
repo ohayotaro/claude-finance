@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from typing import TextIO
 
 FORBIDDEN_FLAGS = ("--full" + "-auto", "--" + "yolo")
@@ -44,6 +45,20 @@ NETWORK_REQUIRED_RE = re.compile(
     r"(?:required|yes|true)\s*$"
 )
 RISK_TIER_RE = re.compile(r"(?im)^\s*##\s*Risk Tier\s*$\s*^([Tt][0-3])\b", re.MULTILINE)
+VALID_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+EFFORT_RANK = {
+    "minimal": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "xhigh": 4,
+}
+DEFAULT_EFFORT_BY_TIER = {
+    "T0": "medium",
+    "T1": "medium",
+    "T2": "high",
+    "T3": "xhigh",
+}
 
 
 class HandoffError(RuntimeError):
@@ -59,16 +74,61 @@ class PhaseConfig:
     output_name: str
 
 
+@dataclass(frozen=True)
+class ModelEffortSelection:
+    """Resolved Codex model and reasoning-effort selection for one phase."""
+
+    requested_model: str | None
+    resolved_model: str | None
+    requested_effort: str | None
+    resolved_effort: str | None
+    selection_source: dict[str, str]
+
+
 PHASES: dict[str, PhaseConfig] = {
     "plan": PhaseConfig("plan", "read-only", "plan.md"),
     "implement": PhaseConfig("implement", "workspace-write", "implementation-result.md"),
     "review": PhaseConfig("review", "read-only", "review.md"),
+}
+PHASE_MODEL_ENV = {
+    "plan": "CODEX_PLAN_MODEL",
+    "implement": "CODEX_IMPLEMENT_MODEL",
+    "review": "CODEX_REVIEW_MODEL",
+}
+PHASE_EFFORT_ENV = {
+    "plan": "CODEX_PLAN_EFFORT",
+    "implement": "CODEX_IMPLEMENT_EFFORT",
+    "review": "CODEX_REVIEW_EFFORT",
 }
 LIFECYCLE_COMMANDS = frozenset({"status", "collect", "cancel"})
 COMMANDS = frozenset(PHASES) | LIFECYCLE_COMMANDS
 
 GitMetadata = dict[str, str]
 HandoffState = dict[str, object]
+
+
+def selection_state_fields(selection: ModelEffortSelection | None) -> HandoffState:
+    """Return additive state/event fields for model and effort selection."""
+
+    if selection is None:
+        return {
+            "requested_model": None,
+            "resolved_model": None,
+            "requested_effort": None,
+            "resolved_effort": None,
+            "selection_source": {
+                "model": "not_applicable",
+                "effort": "not_applicable",
+            },
+        }
+
+    return {
+        "requested_model": selection.requested_model,
+        "resolved_model": selection.resolved_model,
+        "requested_effort": selection.requested_effort,
+        "resolved_effort": selection.resolved_effort,
+        "selection_source": dict(selection.selection_source),
+    }
 
 
 def utc_now() -> str:
@@ -177,10 +237,11 @@ def make_state(
     git_before: GitMetadata,
     git_after: GitMetadata,
     result_path: str,
+    selection: ModelEffortSelection | None = None,
 ) -> HandoffState:
     """Create a complete state object."""
 
-    return {
+    state: HandoffState = {
         "task_id": task_id_from_dir(task_dir),
         "phase": phase,
         "status": status,
@@ -192,6 +253,8 @@ def make_state(
         "git_after": git_after,
         "result_path": result_path,
     }
+    state.update(selection_state_fields(selection))
+    return state
 
 
 def write_state(task_dir: Path, state: HandoffState) -> None:
@@ -259,6 +322,99 @@ def risk_tier(brief: str) -> str | None:
     return match.group(1).upper()
 
 
+def non_empty(value: str | None) -> str | None:
+    """Return stripped text, treating empty strings as missing."""
+
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def validate_effort(effort: str, source: str) -> None:
+    """Reject unsupported model reasoning efforts."""
+
+    if effort not in VALID_EFFORTS:
+        valid = ", ".join(sorted(VALID_EFFORTS))
+        raise HandoffError(f"Invalid Codex effort from {source}: {effort!r}. Valid values: {valid}")
+
+
+def phase_uses_read_only_sandbox(phase: str) -> bool:
+    """Return whether a phase uses a read-only sandbox."""
+
+    return PHASES[phase].sandbox == "read-only"
+
+
+def resolve_model_effort(
+    phase: str,
+    tier: str,
+    cli_model: str | None,
+    cli_effort: str | None,
+    environ: Mapping[str, str],
+) -> ModelEffortSelection:
+    """Resolve Codex model and reasoning effort for a phase."""
+
+    if phase not in PHASES:
+        raise HandoffError(f"Unsupported phase: {phase}")
+
+    tier = tier.upper()
+    if tier not in DEFAULT_EFFORT_BY_TIER:
+        raise HandoffError(f"Unsupported risk tier for Codex effort selection: {tier}")
+
+    model = non_empty(cli_model)
+    model_source = "cli"
+    if model is None:
+        phase_model = non_empty(environ.get(PHASE_MODEL_ENV[phase]))
+        if phase_model is not None:
+            model = phase_model
+            model_source = "phase_env"
+        else:
+            general_model = non_empty(environ.get("CODEX_MODEL"))
+            if general_model is not None:
+                model = general_model
+                model_source = "general_env"
+            elif tier == "T0" and phase_uses_read_only_sandbox(phase):
+                fast_model = non_empty(environ.get("CODEX_FAST_MODEL"))
+                if fast_model is not None:
+                    model = fast_model
+                    model_source = "fast_env"
+                else:
+                    model_source = "omitted"
+            else:
+                model_source = "omitted"
+
+    effort = non_empty(cli_effort)
+    effort_source = "cli"
+    if effort is None:
+        phase_effort = non_empty(environ.get(PHASE_EFFORT_ENV[phase]))
+        if phase_effort is not None:
+            effort = phase_effort
+            effort_source = "phase_env"
+        else:
+            general_effort = non_empty(environ.get("CODEX_EFFORT"))
+            if general_effort is not None:
+                effort = general_effort
+                effort_source = "general_env"
+            else:
+                effort = DEFAULT_EFFORT_BY_TIER[tier]
+                effort_source = "default_matrix"
+
+    validate_effort(effort, effort_source)
+
+    if tier == "T3" and effort_source != "cli" and EFFORT_RANK[effort] < EFFORT_RANK["xhigh"]:
+        raise HandoffError(
+            "T3 tasks require xhigh Codex effort unless deliberately overridden by CLI"
+        )
+
+    return ModelEffortSelection(
+        requested_model=model,
+        resolved_model=model,
+        requested_effort=effort,
+        resolved_effort=effort,
+        selection_source={"model": model_source, "effort": effort_source},
+    )
+
+
 def ensure_no_network_requirement(brief: str) -> None:
     """Fail closed when a task declares that network access is required."""
 
@@ -322,7 +478,12 @@ def git_metadata(project_root: Path) -> GitMetadata:
     }
 
 
-def build_codex_command(phase: str, project_root: Path, output_path: Path) -> list[str]:
+def build_codex_command(
+    phase: str,
+    project_root: Path,
+    output_path: Path,
+    selection: ModelEffortSelection,
+) -> list[str]:
     """Build the Codex command for a phase."""
 
     config = PHASES[phase]
@@ -340,9 +501,11 @@ def build_codex_command(phase: str, project_root: Path, output_path: Path) -> li
         str(output_path),
     ]
 
-    model = os.environ.get("CODEX_HANDOFF_MODEL", "").strip()
-    if model:
-        command.extend(["--model", model])
+    if selection.requested_model is not None:
+        command.extend(["--model", selection.requested_model])
+
+    if selection.requested_effort is not None:
+        command.extend(["-c", f'model_reasoning_effort="{selection.requested_effort}"'])
 
     command.append("-")
     joined = " ".join(command)
@@ -419,6 +582,7 @@ def finish_phase_state(
     git_before: GitMetadata,
     git_after: GitMetadata,
     result_path: str,
+    selection: ModelEffortSelection | None,
     error: str | None = None,
 ) -> None:
     """Write terminal phase state and append a finish marker."""
@@ -434,6 +598,7 @@ def finish_phase_state(
         git_before=git_before,
         git_after=git_after,
         result_path=result_path,
+        selection=selection,
     )
     write_state(task_dir, state)
 
@@ -442,6 +607,7 @@ def finish_phase_state(
         marker_extra["exit_code"] = exit_code
     if error is not None:
         marker_extra["error"] = error
+    marker_extra.update(selection_state_fields(selection))
     append_event_marker(task_dir, phase, "finished", status, marker_extra)
 
 
@@ -451,6 +617,7 @@ def start_phase_state(
     started_at: str,
     git_before: GitMetadata,
     result_path: str,
+    selection: ModelEffortSelection,
 ) -> None:
     """Write running phase state and append a start marker."""
 
@@ -465,14 +632,17 @@ def start_phase_state(
         git_before=git_before,
         git_after={},
         result_path=result_path,
+        selection=selection,
     )
     write_state(task_dir, state)
+    marker_extra: HandoffState = {"pid": os.getpid(), "result_path": result_path}
+    marker_extra.update(selection_state_fields(selection))
     append_event_marker(
         task_dir,
         phase,
         "started",
         "running",
-        {"pid": os.getpid(), "result_path": result_path},
+        marker_extra,
     )
 
 
@@ -570,7 +740,13 @@ def cancel_task(task_ref: str, project_root: Path) -> Path:
     return state_path(task_dir)
 
 
-def execute_phase(phase: str, task_ref: str, project_root: Path) -> Path:
+def execute_phase(
+    phase: str,
+    task_ref: str,
+    project_root: Path,
+    cli_model: str | None = None,
+    cli_effort: str | None = None,
+) -> Path:
     """Run one Codex phase and return the output artifact path."""
 
     if phase not in PHASES:
@@ -579,18 +755,22 @@ def execute_phase(phase: str, task_ref: str, project_root: Path) -> Path:
     project_root = project_root.resolve()
     task_dir = resolve_task_dir(task_ref, project_root)
     brief = read_required(task_dir / "brief.md")
+    tier = risk_tier(brief)
+    if tier is None:
+        raise HandoffError("Brief must include a Risk Tier section before running Codex")
+    selection = resolve_model_effort(phase, tier, cli_model, cli_effort, os.environ)
     output_path = phase_result_path(phase, task_dir)
     result_path = project_relative_path(output_path, project_root)
     started_at = utc_now()
     git_before = git_metadata(project_root)
 
-    start_phase_state(task_dir, phase, started_at, git_before, result_path)
+    start_phase_state(task_dir, phase, started_at, git_before, result_path, selection)
 
     try:
         ensure_no_network_requirement(brief)
         prerequisites = phase_prerequisites(phase, task_dir, brief)
         prompt = prompt_for_phase(phase, brief, prerequisites)
-        command = build_codex_command(phase, project_root, output_path)
+        command = build_codex_command(phase, project_root, output_path, selection)
     except HandoffError as exc:
         git_after = git_metadata(project_root)
         finish_phase_state(
@@ -602,6 +782,7 @@ def execute_phase(phase: str, task_ref: str, project_root: Path) -> Path:
             git_before=git_before,
             git_after=git_after,
             result_path=result_path,
+            selection=selection,
             error=str(exc),
         )
         raise
@@ -627,6 +808,7 @@ def execute_phase(phase: str, task_ref: str, project_root: Path) -> Path:
             git_before=git_before,
             git_after=git_after,
             result_path=result_path,
+            selection=selection,
             error=error,
         )
         raise HandoffError(error) from exc
@@ -651,6 +833,7 @@ def execute_phase(phase: str, task_ref: str, project_root: Path) -> Path:
             git_before=git_before,
             git_after=git_after,
             result_path=result_path,
+            selection=selection,
             error=error,
         )
         raise HandoffError(error)
@@ -670,6 +853,7 @@ def execute_phase(phase: str, task_ref: str, project_root: Path) -> Path:
             git_before=git_before,
             git_after=git_after,
             result_path=result_path,
+            selection=selection,
             error=error,
         )
         raise HandoffError(error)
@@ -683,6 +867,7 @@ def execute_phase(phase: str, task_ref: str, project_root: Path) -> Path:
         git_before=git_before,
         git_after=git_after,
         result_path=result_path,
+        selection=selection,
     )
     return output_path
 
@@ -697,6 +882,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--project-root",
         default=".",
         help="Repository root. Defaults to the current directory.",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Codex model override for phase commands.",
+    )
+    parser.add_argument(
+        "--effort",
+        default=None,
+        help="Codex reasoning effort override for phase commands.",
     )
     return parser.parse_args(argv)
 
@@ -714,7 +909,13 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "cancel":
             output_path = cancel_task(args.task, project_root)
         else:
-            output_path = execute_phase(args.command, args.task, project_root)
+            output_path = execute_phase(
+                args.command,
+                args.task,
+                project_root,
+                cli_model=args.model,
+                cli_effort=args.effort,
+            )
     except HandoffError as exc:
         print(f"codex_handoff: {exc}", file=sys.stderr)
         return 2
