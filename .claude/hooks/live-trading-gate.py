@@ -11,9 +11,10 @@ Detection patterns:
 
 Gates (in order):
   1. KillSwitch: if data/KILL exists -> block.
-  2. Acknowledgment: .claude/state/live-trading-{YYYY-MM-DD}.ack created
+  2. Per-strategy KillSwitch: if data/KILL.{strategy_id} exists -> block.
+  3. Acknowledgment: .claude/state/live-trading-{YYYY-MM-DD}.ack created
      within the last 24 hours. If absent or stale -> block with checklist.
-  3. Otherwise -> allow.
+  4. Otherwise -> allow.
 
 Exit codes:
   0 = allow (no live indicator, or all gates pass)
@@ -25,8 +26,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 LIVE_PATTERNS = [
     r"\bBOT_MODE\s*=\s*['\"]?live\b",
@@ -58,6 +60,30 @@ def first_executable_verb(command: str) -> str | None:
         return os.path.basename(tok)
     return None
 
+
+def command_tokens(command: str) -> list[str]:
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.strip().split()
+
+
+def extract_strategy_id(command: str) -> str | None:
+    tokens = command_tokens(command)
+
+    for index, token in enumerate(tokens):
+        if token == "--strategy-id" and index + 1 < len(tokens):
+            return tokens[index + 1]
+        if token.startswith("--strategy-id="):
+            return token.split("=", 1)[1]
+
+    for token in tokens:
+        if token.startswith("STRATEGY_ID="):
+            return token.split("=", 1)[1]
+
+    return None
+
+
 CHECKLIST = """Live-trading acknowledgment required.
 
 Before acknowledging, confirm ALL of:
@@ -82,13 +108,13 @@ See .claude/rules/security.md "Live-trading acknowledgment" for rationale.
 def acknowledgment_valid(state_dir: str) -> bool:
     if not os.path.isdir(state_dir):
         return False
-    cutoff = datetime.now(UTC) - timedelta(hours=24)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)  # noqa: UP017
     for entry in os.listdir(state_dir):
         if not (entry.startswith("live-trading-") and entry.endswith(".ack")):
             continue
         full = os.path.join(state_dir, entry)
         try:
-            mtime = datetime.fromtimestamp(os.path.getmtime(full), tz=UTC)
+            mtime = datetime.fromtimestamp(os.path.getmtime(full), tz=timezone.utc)  # noqa: UP017
         except OSError:
             continue
         if mtime >= cutoff:
@@ -132,7 +158,20 @@ def main() -> None:
         )
         sys.exit(2)
 
-    # Gate 2: 24-hour acknowledgment file
+    strategy_id = extract_strategy_id(command)
+    if strategy_id:
+        per_strategy_kill_path = os.path.join(project_dir, "data", f"KILL.{strategy_id}")
+        if os.path.exists(per_strategy_kill_path):
+            print(
+                "BLOCKED: Per-strategy KillSwitch active "
+                f"({per_strategy_kill_path} exists for strategy_id={strategy_id}). "
+                "Live-trading commands for this strategy are denied until the "
+                "underlying issue is resolved.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+    # Gate 3: 24-hour acknowledgment file
     state_dir = os.path.join(project_dir, ".claude", "state")
     if acknowledgment_valid(state_dir):
         sys.exit(0)
