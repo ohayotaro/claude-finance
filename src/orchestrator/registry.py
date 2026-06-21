@@ -497,6 +497,13 @@ def _find_entry(doc: RegistryDocument, strategy_id: str) -> StrategyEntry | None
     return None
 
 
+def _account_for_scope(doc: RegistryDocument, account_scope: str) -> AccountEntry | None:
+    for account in doc.accounts:
+        if account.name == account_scope:
+            return account
+    return None
+
+
 def cmd_register(args: argparse.Namespace, project_root: Path) -> int:
     if not SAFE_SYMBOL_RE.match(args.symbol):
         raise UserError(
@@ -542,22 +549,30 @@ def cmd_register(args: argparse.Namespace, project_root: Path) -> int:
         magic_number = 0
         magic_salt = 0
         if runtime is Runtime.MQL5:
+            account = _account_for_scope(doc, args.account_scope)
+            if account is None:
+                raise UserError(
+                    "refused: mql5 strategy account_scope "
+                    f"{args.account_scope!r} has no matching [[accounts]] entry; "
+                    "add the account entry with name="
+                    f"{args.account_scope!r} and position_mode first"
+                )
             # Netting shared-symbol refusal (multi-strategy.md section 3).
-            for acct in doc.accounts:
-                if acct.name == args.account_scope and acct.position_mode is PositionMode.NETTING:
-                    for entry in doc.strategies:
-                        if (
-                            entry.runtime is Runtime.MQL5
-                            and entry.account_scope == args.account_scope
-                            and entry.venue == args.venue
-                            and entry.symbol == args.symbol
-                            and entry.state is not StrategyState.RETIRED
-                        ):
-                            raise UserError(
-                                "refused: netting account "
-                                f"{args.account_scope!r} already has an active mql5 "
-                                f"strategy on {args.venue}/{args.symbol}: {entry.id}"
-                            )
+            if account.position_mode is PositionMode.NETTING:
+                for entry in doc.strategies:
+                    if (
+                        entry.runtime is Runtime.MQL5
+                        and entry.account_scope == args.account_scope
+                        and entry.venue == args.venue
+                        and canonicalize_symbol(entry.symbol) == symbol_canonical
+                        and entry.state is not StrategyState.RETIRED
+                    ):
+                        raise UserError(
+                            "refused: netting account "
+                            f"{args.account_scope!r} already has an active mql5 "
+                            f"strategy on {args.venue}/{args.symbol} "
+                            f"(canonical symbol {symbol_canonical}): {entry.id}"
+                        )
             existing_magic = {
                 e.magic_number
                 for e in doc.strategies
@@ -783,6 +798,12 @@ def cmd_audit(args: argparse.Namespace, project_root: Path) -> int:
     mql5_magics: dict[int, str] = {}
     for entry in doc.strategies:
         if entry.runtime is Runtime.MQL5:
+            account = _account_for_scope(doc, entry.account_scope)
+            if account is None:
+                violations.append(
+                    f"mql5 account_scope missing matching [[accounts]] entry for "
+                    f"{entry.id}: {entry.account_scope}"
+                )
             if not (
                 doc.defaults.magic_range_start <= entry.magic_number <= doc.defaults.magic_range_end
             ):
@@ -803,9 +824,27 @@ def cmd_audit(args: argparse.Namespace, project_root: Path) -> int:
                     f"python entry with non-zero magic_number: {entry.id}"
                 )
 
+    netting_seen: dict[tuple[str, str, str], str] = {}
+    for entry in doc.strategies:
+        if entry.runtime is not Runtime.MQL5 or entry.state is StrategyState.RETIRED:
+            continue
+        account = _account_for_scope(doc, entry.account_scope)
+        if account is None or account.position_mode is not PositionMode.NETTING:
+            continue
+        netting_key = (entry.venue, entry.account_scope, canonicalize_symbol(entry.symbol))
+        if netting_key in netting_seen:
+            violations.append(
+                "netting symbol conflict: "
+                f"venue={entry.venue} account_scope={entry.account_scope} "
+                f"canonical_symbol={netting_key[2]}: "
+                f"{netting_seen[netting_key]} vs {entry.id}"
+            )
+        else:
+            netting_seen[netting_key] = entry.id
+
     canonical_seen: dict[tuple[str, str, str, str, str, str], str] = {}
     for entry in doc.strategies:
-        key = (
+        canonical_key = (
             entry.venue,
             entry.market,
             entry.id.split(".")[2],
@@ -813,11 +852,11 @@ def cmd_audit(args: argparse.Namespace, project_root: Path) -> int:
             entry.timeframe,
             entry.id.rsplit(".v", 1)[-1],
         )
-        if key in canonical_seen:
+        if canonical_key in canonical_seen:
             violations.append(
-                f"canonicalization collision: {entry.id} vs {canonical_seen[key]}"
+                f"canonicalization collision: {entry.id} vs {canonical_seen[canonical_key]}"
             )
-        canonical_seen[key] = entry.id
+        canonical_seen[canonical_key] = entry.id
 
     for entry in doc.strategies:
         try:

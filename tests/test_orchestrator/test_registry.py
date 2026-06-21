@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from src.orchestrator.registry import (
+    AccountEntry,
     DEFAULT_MAGIC_RANGE_END,
     DEFAULT_MAGIC_RANGE_START,
     ENABLEABLE_STATES,
@@ -225,6 +226,49 @@ def _make_entry(sid: str = "binance.swap.mr.btcusdt.5m.v1") -> StrategyEntry:
     )
 
 
+def _make_account(
+    name: str = "broker",
+    position_mode: PositionMode = PositionMode.HEDGING,
+) -> AccountEntry:
+    return AccountEntry(name=name, position_mode=position_mode, notes="")
+
+
+def _seed_registry_accounts(project_root: Path, *accounts: AccountEntry) -> None:
+    reg_path = project_root / "config" / "registry.toml"
+    reg_path.parent.mkdir(parents=True, exist_ok=True)
+    doc = RegistryDocument(
+        schema_version=1,
+        defaults=RegistryDefaults(),
+        accounts=list(accounts),
+        strategies=[],
+    )
+    atomic_replace(reg_path, dump_registry(doc))
+
+
+def _make_mql5_entry(
+    sid: str = "binance.swap.mr.btcusdt.5m.v1",
+    *,
+    account_scope: str = "broker",
+    symbol: str = "BTCUSDT",
+    magic_number: int = 20_000_001,
+) -> StrategyEntry:
+    entry = _make_entry(sid)
+    entry.runtime = Runtime.MQL5
+    entry.symbol = symbol
+    entry.account_scope = account_scope
+    entry.db_path = ""
+    entry.magic_number = magic_number
+    entry.magic_salt = 0
+    return entry
+
+
+def _scaffold_entry_paths(project_root: Path, entry: StrategyEntry) -> None:
+    (project_root / entry.config_path).parent.mkdir(parents=True, exist_ok=True)
+    (project_root / entry.config_path).touch()
+    (project_root / entry.state_path).mkdir(parents=True, exist_ok=True)
+    (project_root / entry.log_path).mkdir(parents=True, exist_ok=True)
+
+
 def test_registry_round_trip(tmp_path: Path) -> None:
     doc = RegistryDocument(
         schema_version=1,
@@ -402,6 +446,7 @@ def test_cli_bad_transition(tmp_path: Path) -> None:
 
 def test_cli_audit_detects_invariant_violation(tmp_path: Path) -> None:
     # Register, then hand-edit the registry to violate magic-uniqueness.
+    _seed_registry_accounts(tmp_path, _make_account("broker", PositionMode.HEDGING))
     _run_cli(
         tmp_path,
         "register",
@@ -439,6 +484,53 @@ def test_cli_audit_detects_invariant_violation(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# MQL5 account metadata and netting safeguards
+# ---------------------------------------------------------------------------
+
+
+def test_mql5_register_refuses_missing_account_metadata(tmp_path: Path) -> None:
+    out = _run_cli(
+        tmp_path,
+        "register",
+        "--venue", "oanda",
+        "--market", "fx",
+        "--logic-slug", "ma-cross",
+        "--symbol", "USDJPY",
+        "--timeframe", "1h",
+        "--runtime", "mql5",
+        "--account-scope", "broker-missing",
+        "--risk-group", "fx",
+    )
+    assert out.returncode == ExitCode.USER_ERROR
+    assert "matching [[accounts]] entry" in out.stderr
+    assert "broker-missing" in out.stderr
+
+
+def test_mql5_register_succeeds_with_matching_account_metadata(tmp_path: Path) -> None:
+    _seed_registry_accounts(tmp_path, _make_account("broker", PositionMode.HEDGING))
+
+    out = _run_cli(
+        tmp_path,
+        "register",
+        "--venue", "oanda",
+        "--market", "fx",
+        "--logic-slug", "ma-cross",
+        "--symbol", "USDJPY",
+        "--timeframe", "1h",
+        "--runtime", "mql5",
+        "--account-scope", "broker",
+        "--risk-group", "fx",
+    )
+    assert out.returncode == ExitCode.OK, out.stderr
+
+    doc = load_registry(tmp_path / "config" / "registry.toml")
+    assert len(doc.strategies) == 1
+    assert doc.strategies[0].runtime is Runtime.MQL5
+    assert doc.strategies[0].account_scope == "broker"
+    assert doc.strategies[0].magic_number > 0
+
+
+# ---------------------------------------------------------------------------
 # Concurrent registration via multiprocessing
 # ---------------------------------------------------------------------------
 
@@ -464,6 +556,9 @@ def _spawn_register(
 
 
 def test_concurrent_register_no_double_magic(tmp_path: Path) -> None:
+    _seed_registry_accounts(
+        tmp_path, _make_account("binance-mql5", PositionMode.HEDGING)
+    )
     queue: multiprocessing.Queue[int] = multiprocessing.Queue()
     procs = [
         multiprocessing.Process(
@@ -524,6 +619,121 @@ def test_netting_shared_symbol_refused(tmp_path: Path) -> None:
     out2 = _run_cli(tmp_path, *common, "--logic-slug", "rsi-bands")
     assert out2.returncode == ExitCode.USER_ERROR
     assert "netting" in out2.stderr.lower()
+
+
+def test_netting_shared_symbol_refuses_different_formatting(tmp_path: Path) -> None:
+    _seed_registry_accounts(
+        tmp_path, _make_account("broker-prop-netting", PositionMode.NETTING)
+    )
+    out = _run_cli(
+        tmp_path,
+        "register",
+        "--venue", "binance",
+        "--market", "swap",
+        "--logic-slug", "mean-revert",
+        "--symbol", "BTC/USDT",
+        "--timeframe", "5m",
+        "--runtime", "mql5",
+        "--account-scope", "broker-prop-netting",
+        "--risk-group", "crypto",
+    )
+    assert out.returncode == ExitCode.OK, out.stderr
+
+    out = _run_cli(
+        tmp_path,
+        "register",
+        "--venue", "binance",
+        "--market", "swap",
+        "--logic-slug", "rsi-bands",
+        "--symbol", "BTCUSDT",
+        "--timeframe", "5m",
+        "--runtime", "mql5",
+        "--account-scope", "broker-prop-netting",
+        "--risk-group", "crypto",
+    )
+    assert out.returncode == ExitCode.USER_ERROR
+    assert "canonical symbol btcusdt" in out.stderr
+
+
+def test_hedging_account_allows_duplicate_symbols(tmp_path: Path) -> None:
+    _seed_registry_accounts(
+        tmp_path, _make_account("broker-prop-hedging", PositionMode.HEDGING)
+    )
+    common = (
+        "--venue", "binance",
+        "--market", "swap",
+        "--symbol", "BTCUSDT",
+        "--timeframe", "5m",
+        "--runtime", "mql5",
+        "--account-scope", "broker-prop-hedging",
+        "--risk-group", "crypto",
+    )
+    out = _run_cli(
+        tmp_path,
+        "register",
+        "--logic-slug", "mean-revert",
+        *common,
+    )
+    assert out.returncode == ExitCode.OK, out.stderr
+
+    out = _run_cli(
+        tmp_path,
+        "register",
+        "--logic-slug", "rsi-bands",
+        *common,
+    )
+    assert out.returncode == ExitCode.OK, out.stderr
+
+    doc = load_registry(tmp_path / "config" / "registry.toml")
+    assert len(doc.strategies) == 2
+
+
+def test_audit_detects_missing_mql5_account_metadata(tmp_path: Path) -> None:
+    entry = _make_mql5_entry(account_scope="broker-missing")
+    _scaffold_entry_paths(tmp_path, entry)
+    reg = tmp_path / "config" / "registry.toml"
+    doc = RegistryDocument(
+        schema_version=1,
+        defaults=RegistryDefaults(),
+        accounts=[],
+        strategies=[entry],
+    )
+    atomic_replace(reg, dump_registry(doc))
+
+    out = _run_cli(tmp_path, "audit")
+    assert out.returncode == ExitCode.INVARIANT_VIOLATION
+    assert "mql5 account_scope missing matching [[accounts]] entry" in out.stdout
+    assert "broker-missing" in out.stdout
+
+
+def test_audit_detects_netting_symbol_conflict(tmp_path: Path) -> None:
+    first = _make_mql5_entry(
+        "binance.swap.mean-revert.btcusdt.5m.v1",
+        account_scope="broker-prop-netting",
+        symbol="BTC/USDT",
+        magic_number=20_000_001,
+    )
+    second = _make_mql5_entry(
+        "binance.swap.rsi-bands.btcusdt.5m.v1",
+        account_scope="broker-prop-netting",
+        symbol="BTCUSDT",
+        magic_number=20_000_002,
+    )
+    for entry in (first, second):
+        _scaffold_entry_paths(tmp_path, entry)
+    reg = tmp_path / "config" / "registry.toml"
+    doc = RegistryDocument(
+        schema_version=1,
+        defaults=RegistryDefaults(),
+        accounts=[_make_account("broker-prop-netting", PositionMode.NETTING)],
+        strategies=[first, second],
+    )
+    atomic_replace(reg, dump_registry(doc))
+
+    out = _run_cli(tmp_path, "audit")
+    assert out.returncode == ExitCode.INVARIANT_VIOLATION
+    assert "netting symbol conflict" in out.stdout
+    assert "canonical_symbol=btcusdt" in out.stdout
 
 
 # ---------------------------------------------------------------------------
