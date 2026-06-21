@@ -74,7 +74,7 @@ For T2 and T3, Claude must approve the plan by writing `approval.md` before impl
 
 ## Implementation Output
 
-Codex implementation output is saved as `result.md` and must include:
+Codex implementation output is saved as the Markdown artifact with stem `implementation-result` and must include:
 
 - Status: `PASS`, `PARTIAL`, or `BLOCKED`
 - Summary
@@ -104,6 +104,30 @@ Use:
 python3 .claude/scripts/codex_handoff.py plan <task-id>
 python3 .claude/scripts/codex_handoff.py implement <task-id>
 python3 .claude/scripts/codex_handoff.py review <task-id>
+python3 .claude/scripts/codex_handoff.py status <task-id>
+python3 .claude/scripts/codex_handoff.py collect <task-id>
+python3 .claude/scripts/codex_handoff.py cancel <task-id>
 ```
 
-The runner centralizes Codex flags, uses stdin prompts, strict config, phase-specific sandboxing, non-interactive approval policy, ephemeral invocations, event logs, output files, and Git metadata. It never enables network access by default and never uses deprecated automation or sandbox-bypass flags.
+The runner centralizes Codex flags, uses stdin prompts, strict config, phase-specific sandboxing, non-interactive approval policy, ephemeral invocations, append-only event logs, output files, state tracking, and Git metadata. It never enables network access by default and never uses deprecated automation or sandbox-bypass flags.
+
+### Background Execution
+
+`plan` runs in the foreground because Claude must inspect and approve the plan before implementation. `implement` and `review` are normal foreground OS processes designed to be launched through Claude Code's native background Bash execution. The runner does not use `nohup`, shell `&`, daemonization, PID supervision, or process signaling. Claude Code owns background task lifecycle management.
+
+`cancel` only writes `status: cancelled` to `state.json`; it does not kill a running Codex process.
+
+### Task Artifacts
+
+Each task directory may contain:
+
+- `brief.md` - PM-authored task brief.
+- `plan.md` - Codex plan output.
+- `approval.md` - Claude approval required before T2/T3 implementation.
+- `implementation-result` + `.md` - Codex implementation output.
+- `review.md` - fresh Codex review output.
+- `state.json` - current or last phase state: task ID, phase, status, timestamps, PID, exit code, Git before/after, and result path.
+- `codex-events.jsonl` - consolidated append-only operational event log with phase markers.
+- `codex-<phase>.stderr.txt` - stderr capture when a phase writes non-empty stderr.
+
+`status` prints `state.json` without modifying files. `collect` prints the current or last phase result artifact referenced by `state.json` without modifying files.

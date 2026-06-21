@@ -12,7 +12,7 @@ Use this when the user asks for an independent review or when a T2/T3 task reach
 
 - `.claude/tasks/<task-id>/brief.md` exists.
 - `plan.md` exists for T2/T3.
-- `result.md` exists and summarizes changed files plus validation evidence.
+- The `implementation-result` Markdown artifact exists and summarizes changed files plus validation evidence.
 - The reviewer must not receive the implementation transcript.
 
 ## Run
@@ -23,4 +23,4 @@ python3 .claude/scripts/codex_handoff.py review <task-id>
 
 ## Acceptance Use
 
-Claude compares `review.md` against the brief, plan, result, test evidence, and user intent. Any `CHANGES_REQUIRED` verdict or unresolved high-severity financial, operational, security, or regression risk blocks acceptance unless the brief is explicitly revised.
+Claude compares `review.md` against the brief, plan, the `implementation-result` Markdown artifact, test evidence, and user intent. Any `CHANGES_REQUIRED` verdict or unresolved high-severity financial, operational, security, or regression risk blocks acceptance unless the brief is explicitly revised.

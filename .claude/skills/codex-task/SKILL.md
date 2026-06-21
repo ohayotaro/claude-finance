@@ -19,16 +19,19 @@ Use this for any repository task that needs substantial inspection, design, impl
 python3 .claude/scripts/codex_handoff.py implement <task-id>
 ```
 
-5. For T2, run plan, write Claude approval to `approval.md`, run implementation, then run review:
+5. For T2, run plan, write Claude approval to `approval.md`, run implementation, then run review. Launch long-running `implement` and `review` commands through Claude Code background Bash execution when appropriate:
 
 ```bash
 python3 .claude/scripts/codex_handoff.py plan <task-id>
 python3 .claude/scripts/codex_handoff.py implement <task-id>
 python3 .claude/scripts/codex_handoff.py review <task-id>
+python3 .claude/scripts/codex_handoff.py status <task-id>
+python3 .claude/scripts/codex_handoff.py collect <task-id>
+python3 .claude/scripts/codex_handoff.py cancel <task-id>
 ```
 
 6. For T3, obtain explicit user approval before implementation or any external action. Automated live execution remains prohibited.
-7. Accept or reject by comparing the brief, Codex result, validation evidence, and independent review.
+7. Accept or reject by comparing the brief, the `implementation-result` Markdown artifact, `state.json`, validation evidence, and independent review. Use `codex-events.jsonl` only as an operational log, not as review input.
 
 ## PM Rules
 

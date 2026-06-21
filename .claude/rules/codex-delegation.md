@@ -19,9 +19,14 @@ Use `.claude/docs/CODEX_TASK_CONTRACT.md` for the task schema, risk tiers, phase
 python3 .claude/scripts/codex_handoff.py plan <task-id>
 python3 .claude/scripts/codex_handoff.py implement <task-id>
 python3 .claude/scripts/codex_handoff.py review <task-id>
+python3 .claude/scripts/codex_handoff.py status <task-id>
+python3 .claude/scripts/codex_handoff.py collect <task-id>
+python3 .claude/scripts/codex_handoff.py cancel <task-id>
 ```
 
-The runner passes prompts through stdin, uses strict config, isolates phases with ephemeral invocations, uses read-only sandboxing for plan/review, uses workspace-write for implementation, and fails closed on missing prerequisites, empty output, Codex failure, task path traversal, or declared network requirements.
+The runner passes prompts through stdin, uses strict config, isolates phases with ephemeral invocations, uses read-only sandboxing for plan/review, uses workspace-write for implementation, writes `plan.md`, the `implementation-result` Markdown artifact, `review.md`, `state.json`, and an append-only `codex-events.jsonl`, and fails closed on missing prerequisites, empty output, Codex failure, task path traversal, or declared network requirements.
+
+Run `implement` and `review` through Claude Code background Bash execution when long-running work should continue asynchronously. The runner itself does not daemonize, detach, kill processes, or manage background PIDs. `status` and `collect` are read-only; `cancel` only marks `state.json` as cancelled.
 
 ## Failure Handling
 
