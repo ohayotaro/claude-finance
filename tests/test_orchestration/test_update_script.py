@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).parents[2]
 
 
-def test_update_script_migrates_legacy_paths_and_preserves_state(tmp_path: Path) -> None:
+def _scaffold_update_project(tmp_path: Path) -> tuple[Path, Path]:
     template = tmp_path / "template"
     project = tmp_path / "project"
     shutil.copytree(ROOT, template, ignore=shutil.ignore_patterns(".git", ".venv", ".pytest_cache"))
@@ -54,17 +58,10 @@ custom codex notes
 """,
         encoding="utf-8",
     )
+    return template, project
 
-    result = subprocess.run(
-        ["bash", str(ROOT / "scripts" / "update.sh")],
-        cwd=project,
-        env={"TEMPLATE_SOURCE_DIR": str(template)},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
 
-    assert result.returncode == 0, result.stderr
+def _assert_update_migrated_legacy_paths_and_preserved_state(project: Path) -> None:
     assert not (project / ".claude" / "agents").exists()
     assert not (project / ".gemini").exists()
     assert not (project / ".claude" / "routing-keywords.json").exists()
@@ -80,3 +77,34 @@ custom codex notes
     assert (project / ".claude" / "docs" / "DESIGN.local-preserved.md").read_text(
         encoding="utf-8"
     ) == "local design"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash is unavailable")
+def test_update_sh_migrates_legacy_paths_and_preserves_state(tmp_path: Path) -> None:
+    template, project = _scaffold_update_project(tmp_path)
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts" / "update.sh")],
+        cwd=project,
+        env={**os.environ, "TEMPLATE_SOURCE_DIR": str(template)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    _assert_update_migrated_legacy_paths_and_preserved_state(project)
+
+
+def test_update_py_migrates_legacy_paths_and_preserves_state(tmp_path: Path) -> None:
+    template, project = _scaffold_update_project(tmp_path)
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "update.py")],
+        cwd=project,
+        env={**os.environ, "TEMPLATE_SOURCE_DIR": str(template)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    _assert_update_migrated_legacy_paths_and_preserved_state(project)

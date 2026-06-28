@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import signal
 import threading
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -930,6 +931,94 @@ def test_main_allows_null_venue_for_draft_strategies(
     assert called["project_root"] == tmp_path.resolve()
     assert isinstance(called["client"], NullVenueClient)
     assert isinstance(called["stop_event"], threading.Event)
+
+
+def test_main_registers_sigterm_on_non_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry = _make_entry(
+        "binance.swap.x.btc.5m.v1",
+        state=StrategyState.DRAFT,
+        enabled=False,
+    )
+    registry_path = _write_registry(tmp_path, [entry])
+    config_path = _write_risk_group_config(tmp_path)
+    registered: list[object] = []
+
+    def fake_signal(signum: object, handler: object) -> None:
+        registered.append(signum)
+
+    def fake_run_forever(
+        config: AggregatorConfig,
+        registry_path: Path,
+        project_root: Path,
+        client: NullVenueClient,
+        stop_event: threading.Event,
+    ) -> int:
+        return int(ExitCode.OK)
+
+    monkeypatch.setattr("src.risk.aggregator.sys.platform", "linux")
+    monkeypatch.setattr("src.risk.aggregator.signal.signal", fake_signal)
+    monkeypatch.setattr("src.risk.aggregator.run_forever", fake_run_forever)
+
+    rc = main([
+        "--risk-group",
+        "crypto-main",
+        "--project-root",
+        str(tmp_path),
+        "--registry",
+        str(registry_path),
+        "--config",
+        str(config_path),
+    ])
+
+    assert rc == int(ExitCode.OK)
+    assert registered == [signal.SIGINT, signal.SIGTERM]
+
+
+def test_main_registers_sigbreak_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry = _make_entry(
+        "binance.swap.x.btc.5m.v1",
+        state=StrategyState.DRAFT,
+        enabled=False,
+    )
+    registry_path = _write_registry(tmp_path, [entry])
+    config_path = _write_risk_group_config(tmp_path)
+    sigbreak = 21
+    registered: list[object] = []
+
+    def fake_signal(signum: object, handler: object) -> None:
+        registered.append(signum)
+
+    def fake_run_forever(
+        config: AggregatorConfig,
+        registry_path: Path,
+        project_root: Path,
+        client: NullVenueClient,
+        stop_event: threading.Event,
+    ) -> int:
+        return int(ExitCode.OK)
+
+    monkeypatch.setattr("src.risk.aggregator.sys.platform", "win32")
+    monkeypatch.setattr("src.risk.aggregator.signal.SIGBREAK", sigbreak, raising=False)
+    monkeypatch.setattr("src.risk.aggregator.signal.signal", fake_signal)
+    monkeypatch.setattr("src.risk.aggregator.run_forever", fake_run_forever)
+
+    rc = main([
+        "--risk-group",
+        "crypto-main",
+        "--project-root",
+        str(tmp_path),
+        "--registry",
+        str(registry_path),
+        "--config",
+        str(config_path),
+    ])
+
+    assert rc == int(ExitCode.OK)
+    assert registered == [signal.SIGINT, sigbreak]
 
 
 def test_null_venue_client_protocol_compatible() -> None:

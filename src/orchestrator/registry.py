@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import fcntl
 import os
 import re
 import sys
@@ -24,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import tomli_w
+from filelock import FileLock, Timeout
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -404,32 +404,32 @@ def dump_registry(doc: RegistryDocument) -> bytes:
 
 @contextlib.contextmanager
 def locked_registry_file(path: Path) -> Iterator[None]:
-    """Hold a non-blocking exclusive flock on a sidecar lock file.
+    """Hold a non-blocking exclusive lock on a sidecar lock file.
 
     Polls up to LOCK_TIMEOUT_S so concurrent callers fail predictably rather
     than hanging forever.
     """
     lock_path = path.with_suffix(path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+    lock = FileLock(lock_path)
+    deadline = time.monotonic() + LOCK_TIMEOUT_S
+    acquired = False
     try:
-        deadline = time.monotonic() + LOCK_TIMEOUT_S
         while True:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                lock.acquire(timeout=0)
+                acquired = True
                 break
-            except BlockingIOError:
+            except Timeout:
                 if time.monotonic() >= deadline:
                     raise LockContentionError(
                         f"could not acquire registry lock within {LOCK_TIMEOUT_S}s"
                     ) from None
                 time.sleep(LOCK_POLL_INTERVAL_S)
-        try:
-            yield
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+        yield
     finally:
-        os.close(fd)
+        if acquired:
+            lock.release()
 
 
 def atomic_replace(path: Path, data: bytes) -> None:

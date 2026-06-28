@@ -7,6 +7,7 @@ workflow from .claude/skills/strategy-register/SKILL.md.
 from __future__ import annotations
 
 import multiprocessing
+import os
 import subprocess
 import sys
 import threading
@@ -358,6 +359,11 @@ def test_lock_contention_times_out_quickly(
 
 
 def _run_cli(project_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    pythonpath = os.pathsep.join(
+        p
+        for p in (str(Path(__file__).resolve().parents[2]), os.environ.get("PYTHONPATH", ""))
+        if p
+    )
     return subprocess.run(
         [
             sys.executable,
@@ -370,7 +376,7 @@ def _run_cli(project_root: Path, *args: str) -> subprocess.CompletedProcess[str]
         check=False,
         capture_output=True,
         text=True,
-        env={"PYTHONPATH": str(Path(__file__).resolve().parents[2]), "PATH": ""},
+        env={"PYTHONPATH": pythonpath, "PATH": ""},
     )
 
 

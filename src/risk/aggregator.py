@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import signal
+import sys
 import tempfile
 import threading
 import time
@@ -1048,8 +1049,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         logger.info("received signal %d, shutting down", signum)
         stop_event.set()
 
-    signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
+    if sys.platform != "win32":
+        signal.signal(signal.SIGTERM, _signal_handler)
+    else:
+        signal.signal(signal.SIGBREAK, _signal_handler)  # type: ignore[attr-defined]
 
     return run_forever(config, registry_path, project_root, client, stop_event)
 
