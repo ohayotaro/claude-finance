@@ -1,0 +1,28 @@
+{
+  "exit_code": 0,
+  "finished_at": "2026-08-22T05:44:12.409106+00:00",
+  "git_after": {
+    "branch": "main",
+    "head": "92aba9fb5f8e8dd51fc325f8d52276dd33288b8c",
+    "status": "M README.md\n M scripts/update.py\n M scripts/update.sh\n M scripts/validate_update_preservation.sh\n M tests/test_orchestration/test_update_script.py\n?? .claude/tasks/updater-python-consolidation-001/"
+  },
+  "git_before": {
+    "branch": "main",
+    "head": "92aba9fb5f8e8dd51fc325f8d52276dd33288b8c",
+    "status": "M README.md\n M scripts/update.py\n M scripts/update.sh\n M scripts/validate_update_preservation.sh\n M tests/test_orchestration/test_update_script.py\n?? .claude/tasks/updater-python-consolidation-001/"
+  },
+  "phase": "review",
+  "pid": 22166,
+  "requested_effort": "high",
+  "requested_model": null,
+  "resolved_effort": "high",
+  "resolved_model": null,
+  "result_path": ".claude/tasks/updater-python-consolidation-001/review.md",
+  "selection_source": {
+    "effort": "cli",
+    "model": "omitted"
+  },
+  "started_at": "2026-08-22T05:38:42.664185+00:00",
+  "status": "succeeded",
+  "task_id": "updater-python-consolidation-001"
+}

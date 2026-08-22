@@ -153,7 +153,7 @@ your-trading-project/
 └── scripts/                          # update script and utilities
 ```
 
-For existing projects that already have their own `pyproject.toml` and source layout, copy only the orchestration layer. The template updater (`scripts/update.sh`) preserves project code and only refreshes orchestration files.
+For existing projects that already have their own `pyproject.toml` and source layout, copy only the orchestration layer. The template updater is implemented in `scripts/update.py`; `scripts/update.sh` is a stable delegating entry point. It preserves project code and only refreshes orchestration files.
 
 ## Skill Pipelines
 
@@ -189,19 +189,42 @@ From an installed project:
 ./scripts/update.sh
 ```
 
-Or from the remote template:
+The shell entry point resolves Python 3.11 or newer and delegates to the single Python implementation. It tries `UPDATER_PYTHON` first, then standard and versioned Python commands, then `uv python find '>=3.11'` to discover an already-installed interpreter without downloading or synchronizing an environment. You can invoke that implementation directly instead:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ohayotaro/claude-finance/main/scripts/update.sh)
+python3 scripts/update.py
+# or with the project interpreter
+uv run python scripts/update.py
+```
+
+Set `UPDATER_PYTHON` to select a specific interpreter when needed:
+
+```bash
+UPDATER_PYTHON=/path/to/python3.11 ./scripts/update.sh
+```
+
+On Windows, invoke `scripts/update.py` directly; the shell entry point and preservation validator require Bash.
+
+For an offline update or a locally checked-out template, set `TEMPLATE_SOURCE_DIR` for either entry point:
+
+```bash
+TEMPLATE_SOURCE_DIR=/path/to/claude-finance ./scripts/update.sh
 ```
 
 Preserved:
 
-- `CLAUDE.md` Zone B
-- `AGENTS.md` project-specific section
+- `CLAUDE.md` Zone B and post-boundary Zone C
+- `AGENTS.md` project-specific and post-boundary sections
+- A differing local `.claude/docs/DESIGN.md`, archived as `DESIGN.local-preserved.sha256-<digest>.md`
 - `.claude/tasks/`, `.claude/checkpoints/`, `.claude/plans/`, `.claude/logs/`, `.claude/state/`
 - `.claude/docs/incidents/`, `.claude/docs/reviews/`, `.claude/settings.local.json`
 - Project code and data outside template-managed paths
+
+Each successful update also refreshes exactly these updater support files from the template, without replacing the rest of `scripts/`:
+
+- `scripts/update.py`
+- `scripts/update.sh`
+- `scripts/validate_update_preservation.sh`
 
 Migrated away:
 
