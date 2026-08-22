@@ -20,7 +20,7 @@ Risk classification is a PM judgment. Hooks enforce only deterministic safety an
 
 ## Task Directory
 
-Create `.claude/tasks/<task-id>/brief.md`. The directory is gitignored and must contain no secrets.
+Create `.claude/tasks/<task-id>/brief.md`. Task artifacts are tracked in Git for auditability, except `.claude/tasks/*/codex-events.jsonl`, which remains local because it is a large machine replay log. No task artifact may contain secrets.
 
 ### Brief Schema
 

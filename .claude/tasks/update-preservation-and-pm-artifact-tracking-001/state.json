@@ -1,0 +1,28 @@
+{
+  "exit_code": 0,
+  "finished_at": "2026-08-22T04:43:23.989987+00:00",
+  "git_after": {
+    "branch": "main",
+    "head": "14dd78b95e2d10ad403621409005241498d653de",
+    "status": "M .claude/docs/CODEX_TASK_CONTRACT.md\n M .claude/docs/reviews/codex-meta-review-2026-05-09.md\n M .gitignore\n M README.md\n M scripts/update.sh\n M tests/test_orchestration/test_update_script.py\n?? .claude/checkpoints/\n?? .claude/tasks/\n?? scripts/validate_update_preservation.sh"
+  },
+  "git_before": {
+    "branch": "main",
+    "head": "14dd78b95e2d10ad403621409005241498d653de",
+    "status": "M .claude/docs/CODEX_TASK_CONTRACT.md\n M .claude/docs/reviews/codex-meta-review-2026-05-09.md\n M .gitignore\n M README.md\n M scripts/update.sh\n M tests/test_orchestration/test_update_script.py\n?? .claude/checkpoints/\n?? .claude/tasks/\n?? scripts/validate_update_preservation.sh"
+  },
+  "phase": "review",
+  "pid": 59303,
+  "requested_effort": "high",
+  "requested_model": null,
+  "resolved_effort": "high",
+  "resolved_model": null,
+  "result_path": ".claude/tasks/update-preservation-and-pm-artifact-tracking-001/review.md",
+  "selection_source": {
+    "effort": "cli",
+    "model": "omitted"
+  },
+  "started_at": "2026-08-22T04:37:07.518646+00:00",
+  "status": "succeeded",
+  "task_id": "update-preservation-and-pm-artifact-tracking-001"
+}

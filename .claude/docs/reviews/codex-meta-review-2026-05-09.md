@@ -17,6 +17,7 @@ Routing exists, but it is advisory and ambiguous in exactly the kinds of mixed p
   Recommended fix: add those three agents and their scopes, or stop other skills from delegating there.
 
 - `.claude/skills/checkpointing/SKILL.md` vs `.gitignore`  
+  Resolution (2026-08-22): Resolved. The finding below records historical state; `.claude/checkpoints/` is now tracked in Git.
   Actual contradiction: [`checkpointing`](/Users/ohayotaro/claude-orchestrator/.claude/skills/checkpointing/SKILL.md:111) says to `git add CLAUDE.md .claude/checkpoints/ ...` and commit checkpoints, but [`.gitignore`](/Users/ohayotaro/claude-orchestrator/.gitignore:32) ignores `.claude/checkpoints/`.  
   Recommended fix: either unignore `.claude/checkpoints/` or change the skill to local-only checkpoints with no git commit step.
 
@@ -68,6 +69,7 @@ Routing exists, but it is advisory and ambiguous in exactly the kinds of mixed p
 
 - `.gitignore:32` → remove `.claude/checkpoints/` from ignore, or `.claude/skills/checkpointing/SKILL.md:111` → remove the commit step and describe checkpoints as local-only.  
   Justification: current state cannot satisfy both files.
+  Resolution (2026-08-22): The first option was implemented; this recommendation is retained as historical review evidence.
 
 - `.claude/skills/backtest/SKILL.md:5` → add `Bash(gemini *)` to `allowed-tools`, or delete Step 8.  
   Justification: the current skill advertises an optional Gemini phase it cannot execute.

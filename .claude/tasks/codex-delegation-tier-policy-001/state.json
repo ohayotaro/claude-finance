@@ -1,0 +1,28 @@
+{
+  "exit_code": 0,
+  "finished_at": "2026-08-22T02:39:49.032838+00:00",
+  "git_after": {
+    "branch": "main",
+    "head": "5e3e20b81c6170eb6520d79d6754f393bc0a0399",
+    "status": "M .claude/docs/CODEX_TASK_CONTRACT.md\n M .claude/rules/codex-delegation.md"
+  },
+  "git_before": {
+    "branch": "main",
+    "head": "5e3e20b81c6170eb6520d79d6754f393bc0a0399",
+    "status": ""
+  },
+  "phase": "implement",
+  "pid": 39578,
+  "requested_effort": "medium",
+  "requested_model": "gpt-5.6-luna",
+  "resolved_effort": "medium",
+  "resolved_model": "gpt-5.6-luna",
+  "result_path": ".claude/tasks/codex-delegation-tier-policy-001/implementation-result.md",
+  "selection_source": {
+    "effort": "cli",
+    "model": "cli"
+  },
+  "started_at": "2026-08-22T02:37:58.878665+00:00",
+  "status": "succeeded",
+  "task_id": "codex-delegation-tier-policy-001"
+}

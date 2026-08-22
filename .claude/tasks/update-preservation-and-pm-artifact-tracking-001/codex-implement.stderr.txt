@@ -1,0 +1,1 @@
+2026-08-22T04:27:06.097712Z ERROR codex_core::tools::router: error=apply_patch verification failed: invalid patch: multiple operations target /Users/ohayotaro/claude-finance/scripts/update.sh

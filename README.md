@@ -91,8 +91,10 @@ All substantial work starts from a canonical task directory:
 ├── implementation-result.md  # Codex implementation output
 ├── review.md                 # fresh Codex review output
 ├── state.json                # phase lifecycle, model/effort, git metadata
-└── codex-events.jsonl        # consolidated phase event log
+└── codex-events.jsonl        # local-only consolidated phase event log
 ```
+
+Task artifacts, `.claude/checkpoints/`, and `.claude/plans/` are tracked in Git for auditability. Only `.claude/tasks/*/codex-events.jsonl` remains ignored because it is a large machine replay log. These artifacts must never contain secrets.
 
 Run phases through the central runner:
 
