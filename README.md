@@ -97,12 +97,12 @@ All substantial work starts from a canonical task directory:
 Run phases through the central runner:
 
 ```bash
-python3 .claude/scripts/codex_handoff.py plan <task-id>
-python3 .claude/scripts/codex_handoff.py implement <task-id>
-python3 .claude/scripts/codex_handoff.py review <task-id>
-python3 .claude/scripts/codex_handoff.py status <task-id>
-python3 .claude/scripts/codex_handoff.py collect <task-id>
-python3 .claude/scripts/codex_handoff.py cancel <task-id>
+uv run python .claude/scripts/codex_handoff.py plan <task-id>
+uv run python .claude/scripts/codex_handoff.py implement <task-id>
+uv run python .claude/scripts/codex_handoff.py review <task-id>
+uv run python .claude/scripts/codex_handoff.py status <task-id>
+uv run python .claude/scripts/codex_handoff.py collect <task-id>
+uv run python .claude/scripts/codex_handoff.py cancel <task-id>
 ```
 
 Risk tiers:

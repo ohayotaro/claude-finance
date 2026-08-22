@@ -101,13 +101,15 @@ The reviewer must be a fresh Codex invocation and must not receive the implement
 Use:
 
 ```bash
-python3 .claude/scripts/codex_handoff.py plan <task-id>
-python3 .claude/scripts/codex_handoff.py implement <task-id>
-python3 .claude/scripts/codex_handoff.py review <task-id>
-python3 .claude/scripts/codex_handoff.py status <task-id>
-python3 .claude/scripts/codex_handoff.py collect <task-id>
-python3 .claude/scripts/codex_handoff.py cancel <task-id>
+uv run python .claude/scripts/codex_handoff.py plan <task-id>
+uv run python .claude/scripts/codex_handoff.py implement <task-id>
+uv run python .claude/scripts/codex_handoff.py review <task-id>
+uv run python .claude/scripts/codex_handoff.py status <task-id>
+uv run python .claude/scripts/codex_handoff.py collect <task-id>
+uv run python .claude/scripts/codex_handoff.py cancel <task-id>
 ```
+
+The runner requires Python 3.11+ (`datetime.UTC`); `uv run python` guarantees the project interpreter, while a bare `python3` may resolve to an older system Python and fail at import time.
 
 The runner centralizes Codex flags, uses stdin prompts, strict config, phase-specific sandboxing, non-interactive approval policy, ephemeral invocations, append-only event logs, output files, state tracking, and Git metadata. It never enables network access by default and never uses deprecated automation or sandbox-bypass flags.
 
@@ -142,6 +144,8 @@ Valid effort values are `minimal`, `low`, `medium`, `high`, and `xhigh`. The run
 T3 tasks fail closed unless the resolved effort is `xhigh`. A lower phase or general env effort is rejected. A lower CLI effort is treated as a deliberate operator override.
 
 `state.json` and phase start markers in `codex-events.jsonl` record `requested_model`, `resolved_model`, `requested_effort`, `resolved_effort`, and `selection_source`.
+
+PM tier selection practice (which model and effort to request per phase kind) is defined in `.claude/rules/codex-delegation.md` under "Model And Effort Tier Policy".
 
 ### Background Execution
 

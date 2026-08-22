@@ -18,7 +18,7 @@ Use this when the user asks for an independent review or when a T2/T3 task reach
 ## Run
 
 ```bash
-python3 .claude/scripts/codex_handoff.py review <task-id>
+uv run python .claude/scripts/codex_handoff.py review <task-id>
 ```
 
 ## Acceptance Use

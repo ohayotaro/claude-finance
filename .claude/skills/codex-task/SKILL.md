@@ -16,18 +16,18 @@ Use this for any repository task that needs substantial inspection, design, impl
 4. For T1, run one implementation phase:
 
 ```bash
-python3 .claude/scripts/codex_handoff.py implement <task-id>
+uv run python .claude/scripts/codex_handoff.py implement <task-id>
 ```
 
 5. For T2, run plan, write Claude approval to `approval.md`, run implementation, then run review. Launch long-running `implement` and `review` commands through Claude Code background Bash execution when appropriate:
 
 ```bash
-python3 .claude/scripts/codex_handoff.py plan <task-id>
-python3 .claude/scripts/codex_handoff.py implement <task-id>
-python3 .claude/scripts/codex_handoff.py review <task-id>
-python3 .claude/scripts/codex_handoff.py status <task-id>
-python3 .claude/scripts/codex_handoff.py collect <task-id>
-python3 .claude/scripts/codex_handoff.py cancel <task-id>
+uv run python .claude/scripts/codex_handoff.py plan <task-id>
+uv run python .claude/scripts/codex_handoff.py implement <task-id>
+uv run python .claude/scripts/codex_handoff.py review <task-id>
+uv run python .claude/scripts/codex_handoff.py status <task-id>
+uv run python .claude/scripts/codex_handoff.py collect <task-id>
+uv run python .claude/scripts/codex_handoff.py cancel <task-id>
 ```
 
 6. For T3, obtain explicit user approval before implementation or any external action. Automated live execution remains prohibited.
