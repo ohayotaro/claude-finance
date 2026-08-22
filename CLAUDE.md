@@ -137,4 +137,4 @@ Current safeguards to preserve:
 Decisions 2026-08-22:
 
 - PM artifacts (`.claude/tasks/`, `.claude/checkpoints/`, `.claude/plans/`) are git-tracked as the acceptance audit trail; `codex-events.jsonl` stays local. `.claude/state/` and `.claude/logs/` remain gitignored by design (live-trading acks must not propagate).
-- `scripts/update.py` is the single template-updater implementation (fail-closed markers, byte-preserving Zone B/C, content-addressed DESIGN archives, self-update of the three updater files); `scripts/update.sh` is a thin wrapper. Downstream repos hold stale destructive updaters until bootstrapped by copying the three files from the template first.
+- `scripts/update.py` is the single template-updater implementation (fail-closed markers, byte-preserving Zone B/C, file-level `.codex` overlay, preserve-local DESIGN.md, self-update of scripts, validator, and updater test); `scripts/update.sh` is a thin wrapper. All downstream repos are bootstrapped onto `abd5beb`; future syncs are a single updater run.
