@@ -133,3 +133,8 @@ Current safeguards to preserve:
 - Lifecycle: `draft -> testnet -> live -> deprecated -> retired`, with no backward transitions.
 - Live promotion requires testnet evidence, configured per-strategy risk limits, stop loss, kill switch test, and notification smoke test.
 - `src/orchestrator/registry.py` and `src/risk/aggregator.py` are implemented runtime code with tests; do not change them unless necessary for validation or tooling.
+
+Decisions 2026-08-22:
+
+- PM artifacts (`.claude/tasks/`, `.claude/checkpoints/`, `.claude/plans/`) are git-tracked as the acceptance audit trail; `codex-events.jsonl` stays local. `.claude/state/` and `.claude/logs/` remain gitignored by design (live-trading acks must not propagate).
+- `scripts/update.py` is the single template-updater implementation (fail-closed markers, byte-preserving Zone B/C, content-addressed DESIGN archives, self-update of the three updater files); `scripts/update.sh` is a thin wrapper. Downstream repos hold stale destructive updaters until bootstrapped by copying the three files from the template first.
