@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -74,9 +75,6 @@ def _assert_update_migrated_legacy_paths_and_preserved_state(project: Path) -> N
     assert (project / ".claude" / "backtest-thresholds.json").read_text(
         encoding="utf-8"
     ) == '{"custom": true}\n'
-    assert (project / ".claude" / "docs" / "DESIGN.local-preserved.md").read_text(
-        encoding="utf-8"
-    ) == "local design"
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash is unavailable")
@@ -93,6 +91,17 @@ def test_update_sh_migrates_legacy_paths_and_preserves_state(tmp_path: Path) -> 
 
     assert result.returncode == 0, result.stderr
     _assert_update_migrated_legacy_paths_and_preserved_state(project)
+    design_content = b"local design"
+    design_digest = hashlib.sha256(design_content).hexdigest()
+    design_archive = (
+        project
+        / ".claude"
+        / "docs"
+        / f"DESIGN.local-preserved.sha256-{design_digest}.md"
+    )
+    assert design_archive.read_bytes() == design_content
+    assert not (project / ".claude" / "docs" / "DESIGN.local-preserved.md").exists()
+    assert "old context" in (project / "CLAUDE.md").read_text(encoding="utf-8")
 
 
 def test_update_py_migrates_legacy_paths_and_preserves_state(tmp_path: Path) -> None:
@@ -108,3 +117,6 @@ def test_update_py_migrates_legacy_paths_and_preserves_state(tmp_path: Path) -> 
 
     assert result.returncode == 0, result.stderr
     _assert_update_migrated_legacy_paths_and_preserved_state(project)
+    assert (project / ".claude" / "docs" / "DESIGN.local-preserved.md").read_text(
+        encoding="utf-8"
+    ) == "local design"
