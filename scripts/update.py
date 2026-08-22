@@ -18,14 +18,21 @@ Safety contract:
     repository-marker line surround the local project section and local
     post-boundary content.
 
-    A differing local DESIGN.md is preserved in a content-addressed archive.
+    The project-owned .claude/docs/DESIGN.md is preserved byte-for-byte when
+    present and copied from the template only as an initial scaffold when
+    absent. Existing DESIGN.local-preserved* files are never touched.
+
+    The .codex directory has mixed ownership. Files present in the incoming
+    template are preflighted, staged, recovered, and replaced individually;
+    all other downstream .codex content is left untouched. If the template has
+    no .codex directory, the downstream .codex tree is not changed.
+
     The updater stages protected content in a private temporary directory and
-    replaces only the three explicitly managed updater files under scripts/.
+    replaces only the four explicitly managed updater support files.
 """
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import stat
@@ -48,11 +55,12 @@ TEMPLATE_FILES_IN_CLAUDE = (
     Path("settings.json"),
     Path("backtest-thresholds.json"),
     Path("docs/CODEX_TASK_CONTRACT.md"),
-    Path("docs/DESIGN.md"),
 )
+DESIGN_PATH = Path(".claude/docs/DESIGN.md")
 SELF_UPDATE_PATHS = (
     Path("scripts/update.py"),
     Path("scripts/validate_update_preservation.sh"),
+    Path("tests/test_orchestration/test_update_script.py"),
     Path("scripts/update.sh"),
 )
 RECOVERY_PATHS = (
@@ -68,8 +76,6 @@ RECOVERY_PATHS = (
     Path(".claude/settings.json"),
     Path(".claude/backtest-thresholds.json"),
     Path(".claude/docs/CODEX_TASK_CONTRACT.md"),
-    Path(".claude/docs/DESIGN.md"),
-    Path(".codex"),
     *SELF_UPDATE_PATHS,
 )
 
@@ -90,7 +96,7 @@ class UpdatePlan:
     staged_agents: Path
     staged_thresholds: Path | None
     staged_design: Path | None
-    design_archive: Path | None
+    staged_codex_files: tuple[tuple[Path, Path], ...]
     staged_updaters: tuple[tuple[Path, Path], ...]
 
 
@@ -132,6 +138,18 @@ def _validate_optional_file(path: Path, description: str) -> None:
 def _validate_optional_directory(path: Path, description: str) -> None:
     if _exists(path) and (not path.is_dir() or path.is_symlink()):
         raise UpdateError(f"Unsafe {description} path: {path}")
+
+
+def _validate_existing_parent_directories(
+    root: Path,
+    relative_path: Path,
+    description: str,
+) -> None:
+    parent = root
+    for part in relative_path.parts[:-1]:
+        parent /= part
+        if _exists(parent):
+            _require_safe_directory(parent, f"Unsafe {description} parent directory: {parent}")
 
 
 def _line_content(line: bytes) -> bytes:
@@ -208,6 +226,18 @@ def _replace_file(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
+def _copy_file_if_absent(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with destination.open("xb") as handle:
+            handle.write(source.read_bytes())
+    except FileExistsError:
+        _validate_optional_file(destination, "local DESIGN.md")
+        return
+    with suppress(NotImplementedError, OSError):
+        destination.chmod(stat.S_IMODE(source.stat().st_mode))
+
+
 def _copy_tree(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, destination)
@@ -258,6 +288,8 @@ def _validate_template_paths(template_root: Path) -> None:
             template_claude / relative_path,
             f"incoming template .claude/{relative_path.as_posix()}",
         )
+    _validate_optional_directory(template_claude / "docs", "incoming template .claude/docs")
+    _validate_optional_file(template_root / DESIGN_PATH, "incoming template DESIGN.md")
     _validate_optional_directory(template_root / ".codex", "incoming template .codex")
 
     _require_safe_directory(
@@ -265,6 +297,11 @@ def _validate_template_paths(template_root: Path) -> None:
         f"Incoming template has no safe scripts/ directory: {template_root / 'scripts'}",
     )
     for relative_path in SELF_UPDATE_PATHS:
+        _validate_existing_parent_directories(
+            template_root,
+            relative_path,
+            f"incoming template {relative_path.as_posix()}",
+        )
         _require_regular_file(template_root / relative_path)
 
 
@@ -290,8 +327,15 @@ def _validate_project_targets(project_root: Path) -> None:
             project_root / ".claude" / relative_path,
             f"local .claude/{relative_path.as_posix()}",
         )
+    _validate_optional_directory(project_root / ".claude/docs", "local .claude/docs")
+    _validate_optional_file(project_root / DESIGN_PATH, "local DESIGN.md")
     _validate_optional_directory(project_root / ".codex", "local .codex")
     for relative_path in SELF_UPDATE_PATHS:
+        _validate_existing_parent_directories(
+            project_root,
+            relative_path,
+            f"local {relative_path.as_posix()}",
+        )
         _validate_optional_file(project_root / relative_path, f"local {relative_path.as_posix()}")
 
 
@@ -306,37 +350,54 @@ def _stage_thresholds(project_root: Path, staged_root: Path) -> Path | None:
     return destination
 
 
-def _stage_design(
+def _stage_initial_design(
     project_root: Path,
     template_root: Path,
     staged_root: Path,
-) -> tuple[Path | None, Path | None]:
-    docs_path = project_root / ".claude/docs"
-    _validate_optional_directory(docs_path, "local .claude/docs")
-    template_design = template_root / ".claude/docs/DESIGN.md"
-    if not _exists(template_design):
-        return None, None
+) -> Path | None:
+    template_design = template_root / DESIGN_PATH
+    local_design = project_root / DESIGN_PATH
+    if not _exists(template_design) or _exists(local_design):
+        return None
 
-    _require_regular_file(template_design)
-    local_design = docs_path / "DESIGN.md"
-    if not _exists(local_design):
-        return None, None
-    _validate_optional_file(local_design, "local DESIGN.md")
+    staged_design = staged_root / DESIGN_PATH
+    _stage_file(template_design, staged_design)
+    return staged_design
 
-    local_bytes = local_design.read_bytes()
-    if local_bytes == template_design.read_bytes():
-        return None, None
 
-    digest = hashlib.sha256(local_bytes).hexdigest()
-    archive = docs_path / f"DESIGN.local-preserved.sha256-{digest}.md"
-    if _exists(archive):
-        _validate_optional_file(archive, "DESIGN.md archive")
-        if archive.read_bytes() != local_bytes:
-            raise UpdateError(f"DESIGN.md archive digest collision or content mismatch: {archive}")
+def _validate_codex_destination(project_codex: Path, relative_path: Path) -> Path:
+    destination = project_codex / relative_path
+    parent = project_codex
+    for part in relative_path.parts[:-1]:
+        parent /= part
+        if _exists(parent):
+            _require_safe_directory(parent)
+    _validate_optional_file(destination, f"local .codex/{relative_path.as_posix()}")
+    return destination
 
-    staged_design = staged_root / "DESIGN.md"
-    staged_design.write_bytes(local_bytes)
-    return staged_design, archive
+
+def _stage_codex_files(
+    project_root: Path,
+    template_root: Path,
+    staged_root: Path,
+) -> tuple[tuple[Path, Path], ...]:
+    template_codex = template_root / ".codex"
+    if not _exists(template_codex):
+        return ()
+
+    project_codex = project_root / ".codex"
+    staged_files: list[tuple[Path, Path]] = []
+    for source in sorted(template_codex.rglob("*")):
+        relative_path = source.relative_to(template_codex)
+        if source.is_dir() and not source.is_symlink():
+            continue
+        if not source.is_file() or source.is_symlink():
+            raise UpdateError(f"Unsafe incoming template .codex path: {source}")
+        destination = _validate_codex_destination(project_codex, relative_path)
+        staged_source = staged_root / ".codex" / relative_path
+        _stage_file(source, staged_source)
+        staged_files.append((staged_source, destination))
+    return tuple(staged_files)
 
 
 def _backup_for_recovery(project_root: Path, recovery_dir: Path, relative_path: Path) -> None:
@@ -358,8 +419,12 @@ def _backup_for_recovery(project_root: Path, recovery_dir: Path, relative_path: 
 def _create_recovery(plan: UpdatePlan) -> None:
     _yellow("Creating private recovery copies")
     paths = list(RECOVERY_PATHS)
-    if plan.design_archive is not None:
-        paths.append(plan.design_archive.relative_to(plan.project_root))
+    if plan.staged_design is not None:
+        paths.append(DESIGN_PATH)
+    paths.extend(
+        destination.relative_to(plan.project_root)
+        for _, destination in plan.staged_codex_files
+    )
     for relative_path in paths:
         _backup_for_recovery(plan.project_root, plan.recovery_dir, relative_path)
     (plan.recovery_dir / "README.txt").write_text(
@@ -398,7 +463,8 @@ def _prepare_update(project_root: Path, work_dir: Path) -> UpdatePlan:
     )
 
     staged_thresholds = _stage_thresholds(project_root, staged_root)
-    staged_design, design_archive = _stage_design(project_root, template_root, staged_root)
+    staged_design = _stage_initial_design(project_root, template_root, staged_root)
+    staged_codex_files = _stage_codex_files(project_root, template_root, staged_root)
 
     staged_updaters: list[tuple[Path, Path]] = []
     for relative_path in SELF_UPDATE_PATHS:
@@ -417,29 +483,11 @@ def _prepare_update(project_root: Path, work_dir: Path) -> UpdatePlan:
         staged_agents=staged_agents,
         staged_thresholds=staged_thresholds,
         staged_design=staged_design,
-        design_archive=design_archive,
+        staged_codex_files=staged_codex_files,
         staged_updaters=tuple(staged_updaters),
     )
     _create_recovery(plan)
     return plan
-
-
-def _create_or_verify_design_archive(plan: UpdatePlan) -> None:
-    if plan.staged_design is None or plan.design_archive is None:
-        return
-
-    archive = plan.design_archive
-    expected = plan.staged_design.read_bytes()
-    archive.parent.mkdir(parents=True, exist_ok=True)
-    if not _exists(archive):
-        try:
-            with archive.open("xb") as handle:
-                handle.write(expected)
-        except FileExistsError:
-            pass
-    _validate_optional_file(archive, "DESIGN.md archive")
-    if archive.read_bytes() != expected:
-        raise UpdateError(f"DESIGN.md archive verification failed: {archive}")
 
 
 def _best_effort_make_template_scripts_executable(project_root: Path) -> None:
@@ -472,20 +520,18 @@ def _apply_update(plan: UpdatePlan) -> None:
             _remove_path(destination)
             _copy_tree(source, destination)
 
-    _create_or_verify_design_archive(plan)
     for relative_path in TEMPLATE_FILES_IN_CLAUDE:
         source = template_root / ".claude" / relative_path
         if source.is_file():
             _replace_file(source, project_root / ".claude" / relative_path)
+    if plan.staged_design is not None:
+        _copy_file_if_absent(plan.staged_design, project_root / DESIGN_PATH)
 
-    _yellow("Replacing root contracts and Codex config")
+    _yellow("Replacing root contracts and template-managed Codex files")
     _replace_file(plan.staged_claude, project_root / "CLAUDE.md")
     _replace_file(plan.staged_agents, project_root / "AGENTS.md")
-    template_codex = template_root / ".codex"
-    if template_codex.is_dir():
-        destination_codex = project_root / ".codex"
-        _remove_path(destination_codex)
-        _copy_tree(template_codex, destination_codex)
+    for source, destination in plan.staged_codex_files:
+        _replace_file(source, destination)
 
     if plan.staged_thresholds is not None:
         _replace_file(

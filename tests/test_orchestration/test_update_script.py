@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import os
 import re
@@ -21,6 +20,7 @@ SHELL_UPDATER = ROOT / "scripts/update.sh"
 SELF_UPDATE_PATHS = (
     Path("scripts/update.py"),
     Path("scripts/validate_update_preservation.sh"),
+    Path("tests/test_orchestration/test_update_script.py"),
     Path("scripts/update.sh"),
 )
 
@@ -91,6 +91,7 @@ LOCAL_AGENTS = (
 EXPECTED_AGENTS = (
     TEMPLATE_AGENTS_PREFIX + LOCAL_AGENTS_ZONE + TEMPLATE_AGENTS_REPO_LINE + LOCAL_AGENTS_POST
 )
+LOCAL_CODEX_PLAN = b"project codex plan\r\nwithout final newline"
 
 ENTRY_POINTS = [
     pytest.param("python", id="python"),
@@ -138,12 +139,18 @@ def _make_project(root: Path) -> None:
     _write(root / ".claude/docs/CODEX_TASK_CONTRACT.md", b"local task contract\n")
     _write(root / ".claude/docs/DESIGN.md", b"local design without newline")
     _write(root / ".claude/docs/DESIGN.local-preserved.md", b"legacy archive unchanged\n")
+    _write(
+        root / ".claude/docs/DESIGN.local-preserved.sha256-existing.md",
+        b"existing content-addressed archive unchanged\n",
+    )
     _write(root / ".claude/tasks/task-1/brief.md", b"preserved task\n")
     _write(root / ".claude/logs/preserved.log", b"preserved log\n")
     _write(root / ".codex/config.toml", b"local = true\n")
+    _write(root / ".codex/plans/decoy.md", LOCAL_CODEX_PLAN)
     for relative_path in SELF_UPDATE_PATHS:
         _write(root / relative_path, b"stale updater\n")
     _write(root / "scripts/project-owned-decoy.sh", b"project owned\n")
+    _write(root / "tests/project-owned-decoy.py", b"project owned test\n")
     for name in (
         ".zone-b.backup.md",
         ".agents-project.backup.md",
@@ -209,26 +216,35 @@ def _assert_success_outcomes(project: Path, template: Path) -> None:
     assert not (project / ".claude/routing-keywords.json").exists()
     assert not (project / ".gemini").exists()
 
-    local_design = b"local design without newline"
-    digest = hashlib.sha256(local_design).hexdigest()
-    archive = project / ".claude/docs" / f"DESIGN.local-preserved.sha256-{digest}.md"
-    assert archive.read_bytes() == local_design
-    assert (project / ".claude/docs/DESIGN.md").read_bytes() == b"incoming design\n"
+    assert (project / ".claude/docs/DESIGN.md").read_bytes() == b"local design without newline"
     assert (project / ".claude/docs/DESIGN.local-preserved.md").read_bytes() == (
         b"legacy archive unchanged\n"
     )
+    assert (
+        project / ".claude/docs/DESIGN.local-preserved.sha256-existing.md"
+    ).read_bytes() == b"existing content-addressed archive unchanged\n"
+
+    assert (project / ".codex/config.toml").read_bytes() == (
+        template / ".codex/config.toml"
+    ).read_bytes()
+    assert (project / ".codex/plans/decoy.md").read_bytes() == LOCAL_CODEX_PLAN
 
     expected_scripts = {
         "project-owned-decoy.sh": b"project owned\n",
         **{
             relative_path.name: (template / relative_path).read_bytes()
             for relative_path in SELF_UPDATE_PATHS
+            if relative_path.parent == Path("scripts")
         },
     }
     actual_scripts = {
         path.name: path.read_bytes() for path in (project / "scripts").iterdir() if path.is_file()
     }
     assert actual_scripts == expected_scripts
+    assert (
+        project / "tests/test_orchestration/test_update_script.py"
+    ).read_bytes() == (template / "tests/test_orchestration/test_update_script.py").read_bytes()
+    assert (project / "tests/project-owned-decoy.py").read_bytes() == b"project owned test\n"
 
     for name in (
         ".zone-b.backup.md",
@@ -253,8 +269,39 @@ def test_hardened_update_succeeds_for_both_entry_points(
     second = _run_update(entry_point, project, template)
     assert second.returncode == 0, second.stderr
     _assert_success_outcomes(project, template)
-    archives = list((project / ".claude/docs").glob("DESIGN.local-preserved.sha256-*.md"))
-    assert len(archives) == 1
+
+
+@pytest.mark.parametrize("entry_point", ENTRY_POINTS)
+def test_absent_design_receives_template_scaffold(
+    tmp_path: Path,
+    entry_point: str,
+) -> None:
+    template, project = _scaffold(tmp_path)
+    (project / ".claude/docs/DESIGN.md").unlink()
+
+    first = _run_update(entry_point, project, template)
+    assert first.returncode == 0, first.stderr
+    assert (project / ".claude/docs/DESIGN.md").read_bytes() == b"incoming design\n"
+
+    _write(template / ".claude/docs/DESIGN.md", b"changed template design\n")
+    second = _run_update(entry_point, project, template)
+    assert second.returncode == 0, second.stderr
+    assert (project / ".claude/docs/DESIGN.md").read_bytes() == b"incoming design\n"
+
+
+@pytest.mark.parametrize("entry_point", ENTRY_POINTS)
+def test_missing_template_codex_leaves_downstream_tree_untouched(
+    tmp_path: Path,
+    entry_point: str,
+) -> None:
+    template, project = _scaffold(tmp_path)
+    shutil.rmtree(template / ".codex")
+    before = _tree_manifest(project / ".codex")
+
+    result = _run_update(entry_point, project, template)
+
+    assert result.returncode == 0, result.stderr
+    assert _tree_manifest(project / ".codex") == before
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash is unavailable")
@@ -330,20 +377,72 @@ def test_updater_rejects_invalid_markers_without_mutation(
         assert marker in result.stderr
 
 
-def test_python_updater_rejects_mismatched_existing_design_archive(tmp_path: Path) -> None:
+def test_updater_code_does_not_manage_design_archives() -> None:
+    source = PYTHON_UPDATER.read_text(encoding="utf-8")
+    executable_source = source[source.index("from __future__") :]
+    assert "DESIGN.local-preserved" not in executable_source
+    assert "design_archive" not in executable_source
+    assert "hashlib" not in executable_source
+
+
+def test_python_updater_rejects_unsafe_template_codex_file_without_mutation(
+    tmp_path: Path,
+) -> None:
     template, project = _scaffold(tmp_path)
-    local_design = (project / ".claude/docs/DESIGN.md").read_bytes()
-    digest = hashlib.sha256(local_design).hexdigest()
-    archive = project / ".claude/docs" / f"DESIGN.local-preserved.sha256-{digest}.md"
-    _write(archive, b"wrong archive bytes\n")
+    unsafe_path = template / ".codex/unsafe-link"
+    try:
+        unsafe_path.symlink_to(template / ".codex/config.toml")
+    except OSError as error:
+        pytest.skip(f"symlinks are unavailable: {error}")
     before = _tree_manifest(project)
 
     result = _run_update("python", project, template)
 
     assert result.returncode != 0
-    assert "digest collision or content mismatch" in result.stderr
-    assert str(archive) in result.stderr
+    assert "Unsafe incoming template .codex path" in result.stderr
     assert _tree_manifest(project) == before
+
+
+def test_python_updater_rejects_unsafe_codex_destination_without_mutation(
+    tmp_path: Path,
+) -> None:
+    template, project = _scaffold(tmp_path)
+    config = project / ".codex/config.toml"
+    config.unlink()
+    try:
+        config.symlink_to(project / "CLAUDE.md")
+    except OSError as error:
+        pytest.skip(f"symlinks are unavailable: {error}")
+    before = _tree_manifest(project)
+
+    result = _run_update("python", project, template)
+
+    assert result.returncode != 0
+    assert "Unsafe local .codex/config.toml path" in result.stderr
+    assert _tree_manifest(project) == before
+
+
+def test_python_updater_rejects_unsafe_updater_test_parent_without_mutation(
+    tmp_path: Path,
+) -> None:
+    template, project = _scaffold(tmp_path)
+    tests_root = project / "tests"
+    shutil.rmtree(tests_root)
+    try:
+        tests_root.symlink_to(project / "scripts", target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"symlinks are unavailable: {error}")
+    original_target = os.readlink(tests_root)
+
+    result = _run_update("python", project, template)
+
+    assert result.returncode != 0
+    assert (
+        "Unsafe local tests/test_orchestration/test_update_script.py parent directory"
+        in result.stderr
+    )
+    assert tests_root.is_symlink()
+    assert os.readlink(tests_root) == original_target
 
 
 def _load_updater_module() -> ModuleType:
@@ -386,6 +485,8 @@ def test_post_mutation_failure_retains_and_reports_recovery(
     try:
         assert recovery_dir.is_dir()
         assert (recovery_dir / "project/CLAUDE.md").read_bytes() == LOCAL_CLAUDE
+        assert (recovery_dir / "project/.codex/config.toml").read_bytes() == b"local = true\n"
+        assert not (recovery_dir / "project/.codex/plans/decoy.md").exists()
         for relative_path in SELF_UPDATE_PATHS:
             assert (recovery_dir / "project" / relative_path).read_bytes() == b"stale updater\n"
     finally:

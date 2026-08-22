@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 PYTHON_UPDATER="$SCRIPT_DIR/update.py"
 SHELL_UPDATER="$SCRIPT_DIR/update.sh"
+UPDATER_TEST="$SCRIPT_DIR/../tests/test_orchestration/test_update_script.py"
 FIXTURE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/validate-update-preservation.XXXXXX")"
 NO_NETWORK_BIN="$FIXTURE_ROOT/no-network-bin"
 PYTHON=""
@@ -40,18 +41,6 @@ assert_tree_same() {
   local description="$3"
 
   diff -r "$expected" "$actual" >/dev/null || fail "$description differs"
-}
-
-sha256_file() {
-  local file="$1"
-
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$file" | awk '{print $1}'
-  elif command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$file" | awk '{print $1}'
-  else
-    fail "Neither shasum nor sha256sum is available."
-  fi
 }
 
 is_supported_python() {
@@ -104,7 +93,8 @@ make_template() {
     "$root/.claude/scripts" \
     "$root/.claude/docs" \
     "$root/.codex" \
-    "$root/scripts"
+    "$root/scripts" \
+    "$root/tests/test_orchestration"
 
   {
     printf '# Incoming CLAUDE\r\n'
@@ -135,6 +125,7 @@ make_template() {
   cp "$PYTHON_UPDATER" "$root/scripts/update.py"
   cp "$SCRIPT_DIR/validate_update_preservation.sh" \
     "$root/scripts/validate_update_preservation.sh"
+  cp "$UPDATER_TEST" "$root/tests/test_orchestration/test_update_script.py"
   cp "$SHELL_UPDATER" "$root/scripts/update.sh"
 }
 
@@ -151,8 +142,9 @@ make_downstream() {
     "$root/.claude/tasks/task-1" \
     "$root/.claude/logs" \
     "$root/.gemini" \
-    "$root/.codex" \
-    "$root/scripts"
+    "$root/.codex/plans" \
+    "$root/scripts" \
+    "$root/tests/test_orchestration"
 
   {
     printf '# Local CLAUDE\n'
@@ -186,13 +178,18 @@ make_downstream() {
   printf 'local design without newline' > "$root/.claude/docs/DESIGN.md"
   printf '%s\n' 'legacy archive unchanged' > \
     "$root/.claude/docs/DESIGN.local-preserved.md"
+  printf '%s\n' 'existing content-addressed archive unchanged' > \
+    "$root/.claude/docs/DESIGN.local-preserved.sha256-existing.md"
   printf '%s\n' 'preserved task' > "$root/.claude/tasks/task-1/brief.md"
   printf '%s\n' 'preserved log' > "$root/.claude/logs/preserved.log"
   printf '%s\n' 'local codex config' > "$root/.codex/config.toml"
+  printf 'project codex plan\r\nwithout final newline' > "$root/.codex/plans/decoy.md"
   printf '%s\n' 'stale updater' > "$root/scripts/update.py"
   printf '%s\n' 'stale updater' > "$root/scripts/validate_update_preservation.sh"
   printf '%s\n' 'stale updater' > "$root/scripts/update.sh"
   printf '%s\n' 'project owned' > "$root/scripts/project-owned-decoy.sh"
+  printf '%s\n' 'stale updater test' > "$root/tests/test_orchestration/test_update_script.py"
+  printf '%s\n' 'project owned test' > "$root/tests/project-owned-decoy.py"
 
   for old_backup in \
     .zone-b.backup.md \
@@ -274,8 +271,6 @@ assert_success_outcomes() {
   local project="$1"
   local template="$2"
   local expected="$3"
-  local design_digest
-  local design_archive
   local script_count
 
   assert_same "$expected/CLAUDE.md" "$project/CLAUDE.md" "preserved CLAUDE.md"
@@ -286,14 +281,30 @@ assert_success_outcomes() {
     "$project/.claude/backtest-thresholds.json" \
     "preserved thresholds"
   printf 'local design without newline' > "$expected/local-design.md"
-  design_digest="$(sha256_file "$expected/local-design.md")"
-  design_archive="$project/.claude/docs/DESIGN.local-preserved.sha256-${design_digest}.md"
-  assert_same "$expected/local-design.md" "$design_archive" "content-addressed DESIGN archive"
+  assert_same \
+    "$expected/local-design.md" \
+    "$project/.claude/docs/DESIGN.md" \
+    "preserved local DESIGN.md"
   printf '%s\n' 'legacy archive unchanged' > "$expected/legacy-design.md"
   assert_same \
     "$expected/legacy-design.md" \
     "$project/.claude/docs/DESIGN.local-preserved.md" \
     "legacy DESIGN archive"
+  printf '%s\n' 'existing content-addressed archive unchanged' > \
+    "$expected/content-addressed-design.md"
+  assert_same \
+    "$expected/content-addressed-design.md" \
+    "$project/.claude/docs/DESIGN.local-preserved.sha256-existing.md" \
+    "existing content-addressed DESIGN archive"
+  assert_same \
+    "$template/.codex/config.toml" \
+    "$project/.codex/config.toml" \
+    "template-managed Codex config"
+  printf 'project codex plan\r\nwithout final newline' > "$expected/codex-plan.md"
+  assert_same \
+    "$expected/codex-plan.md" \
+    "$project/.codex/plans/decoy.md" \
+    "project-owned Codex plan"
   assert_same \
     "$template/scripts/update.py" \
     "$project/scripts/update.py" \
@@ -303,6 +314,10 @@ assert_success_outcomes() {
     "$project/scripts/validate_update_preservation.sh" \
     "self-updated validator"
   assert_same \
+    "$template/tests/test_orchestration/test_update_script.py" \
+    "$project/tests/test_orchestration/test_update_script.py" \
+    "self-updated updater test"
+  assert_same \
     "$template/scripts/update.sh" \
     "$project/scripts/update.sh" \
     "self-updated shell wrapper"
@@ -311,6 +326,11 @@ assert_success_outcomes() {
     "$expected/project-owned-decoy.sh" \
     "$project/scripts/project-owned-decoy.sh" \
     "project-owned scripts decoy"
+  printf '%s\n' 'project owned test' > "$expected/project-owned-test.py"
+  assert_same \
+    "$expected/project-owned-test.py" \
+    "$project/tests/project-owned-decoy.py" \
+    "project-owned tests decoy"
   script_count="$(find "$project/scripts" -type f | wc -l | tr -d ' ')"
   [[ "$script_count" = "4" ]] || fail "Expected exactly four downstream scripts; found $script_count"
   [[ ! -e "$project/.claude/agents" ]] || fail "Legacy agents path survived"
@@ -340,13 +360,85 @@ run_update "python" "$PYTHON_PROJECT" "$PRIMARY_TEMPLATE" "$FIXTURE_ROOT/python-
 assert_success_outcomes "$PYTHON_PROJECT" "$PRIMARY_TEMPLATE" "$EXPECTED"
 run_update "python" "$PYTHON_PROJECT" "$PRIMARY_TEMPLATE" "$FIXTURE_ROOT/python-second.log"
 assert_success_outcomes "$PYTHON_PROJECT" "$PRIMARY_TEMPLATE" "$EXPECTED"
-ARCHIVE_COUNT="$(find "$PYTHON_PROJECT/.claude/docs" -type f \
-  -name 'DESIGN.local-preserved.sha256-*.md' | wc -l | tr -d ' ')"
-[[ "$ARCHIVE_COUNT" = "1" ]] || fail "Expected one deduplicated DESIGN archive"
 
 run_update "shell" "$SHELL_PROJECT" "$PRIMARY_TEMPLATE" "$FIXTURE_ROOT/shell.log"
 assert_success_outcomes "$SHELL_PROJECT" "$PRIMARY_TEMPLATE" "$EXPECTED"
 assert_tree_same "$PYTHON_PROJECT" "$SHELL_PROJECT" "Python and shell entry-point outcomes"
+
+ABSENT_DESIGN_TEMPLATE="$FIXTURE_ROOT/absent-design-template"
+ABSENT_DESIGN_PYTHON_PROJECT="$FIXTURE_ROOT/absent-design-python-project"
+ABSENT_DESIGN_SHELL_PROJECT="$FIXTURE_ROOT/absent-design-shell-project"
+make_template "$ABSENT_DESIGN_TEMPLATE"
+make_downstream "$ABSENT_DESIGN_PYTHON_PROJECT"
+make_downstream "$ABSENT_DESIGN_SHELL_PROJECT"
+rm "$ABSENT_DESIGN_PYTHON_PROJECT/.claude/docs/DESIGN.md"
+rm "$ABSENT_DESIGN_SHELL_PROJECT/.claude/docs/DESIGN.md"
+cp "$ABSENT_DESIGN_TEMPLATE/.claude/docs/DESIGN.md" "$EXPECTED/initial-design.md"
+run_update \
+  "python" \
+  "$ABSENT_DESIGN_PYTHON_PROJECT" \
+  "$ABSENT_DESIGN_TEMPLATE" \
+  "$FIXTURE_ROOT/absent-design-python-first.log"
+run_update \
+  "shell" \
+  "$ABSENT_DESIGN_SHELL_PROJECT" \
+  "$ABSENT_DESIGN_TEMPLATE" \
+  "$FIXTURE_ROOT/absent-design-shell-first.log"
+assert_same \
+  "$EXPECTED/initial-design.md" \
+  "$ABSENT_DESIGN_PYTHON_PROJECT/.claude/docs/DESIGN.md" \
+  "initial Python DESIGN scaffold"
+assert_same \
+  "$EXPECTED/initial-design.md" \
+  "$ABSENT_DESIGN_SHELL_PROJECT/.claude/docs/DESIGN.md" \
+  "initial shell DESIGN scaffold"
+printf '%s\n' 'changed incoming design' > "$ABSENT_DESIGN_TEMPLATE/.claude/docs/DESIGN.md"
+run_update \
+  "python" \
+  "$ABSENT_DESIGN_PYTHON_PROJECT" \
+  "$ABSENT_DESIGN_TEMPLATE" \
+  "$FIXTURE_ROOT/absent-design-python-second.log"
+run_update \
+  "shell" \
+  "$ABSENT_DESIGN_SHELL_PROJECT" \
+  "$ABSENT_DESIGN_TEMPLATE" \
+  "$FIXTURE_ROOT/absent-design-shell-second.log"
+assert_same \
+  "$EXPECTED/initial-design.md" \
+  "$ABSENT_DESIGN_PYTHON_PROJECT/.claude/docs/DESIGN.md" \
+  "preserved Python DESIGN scaffold"
+assert_same \
+  "$EXPECTED/initial-design.md" \
+  "$ABSENT_DESIGN_SHELL_PROJECT/.claude/docs/DESIGN.md" \
+  "preserved shell DESIGN scaffold"
+
+NO_CODEX_TEMPLATE="$FIXTURE_ROOT/no-codex-template"
+NO_CODEX_PYTHON_PROJECT="$FIXTURE_ROOT/no-codex-python-project"
+NO_CODEX_SHELL_PROJECT="$FIXTURE_ROOT/no-codex-shell-project"
+make_template "$NO_CODEX_TEMPLATE"
+rm -rf "$NO_CODEX_TEMPLATE/.codex"
+make_downstream "$NO_CODEX_PYTHON_PROJECT"
+make_downstream "$NO_CODEX_SHELL_PROJECT"
+cp -R "$NO_CODEX_PYTHON_PROJECT/.codex" "$FIXTURE_ROOT/no-codex-python-snapshot"
+cp -R "$NO_CODEX_SHELL_PROJECT/.codex" "$FIXTURE_ROOT/no-codex-shell-snapshot"
+run_update \
+  "python" \
+  "$NO_CODEX_PYTHON_PROJECT" \
+  "$NO_CODEX_TEMPLATE" \
+  "$FIXTURE_ROOT/no-codex-python.log"
+run_update \
+  "shell" \
+  "$NO_CODEX_SHELL_PROJECT" \
+  "$NO_CODEX_TEMPLATE" \
+  "$FIXTURE_ROOT/no-codex-shell.log"
+assert_tree_same \
+  "$FIXTURE_ROOT/no-codex-python-snapshot" \
+  "$NO_CODEX_PYTHON_PROJECT/.codex" \
+  "downstream-only Python Codex tree"
+assert_tree_same \
+  "$FIXTURE_ROOT/no-codex-shell-snapshot" \
+  "$NO_CODEX_SHELL_PROJECT/.codex" \
+  "downstream-only shell Codex tree"
 
 EMPTY_TEMPLATE="$FIXTURE_ROOT/empty-template"
 EMPTY_PROJECT="$FIXTURE_ROOT/empty-project"
@@ -426,22 +518,5 @@ for location in local template; do
     done
   done
 done
-
-COLLISION_TEMPLATE="$FIXTURE_ROOT/collision-template"
-COLLISION_PROJECT="$FIXTURE_ROOT/collision-project"
-COLLISION_SNAPSHOT="$FIXTURE_ROOT/collision-snapshot"
-make_template "$COLLISION_TEMPLATE"
-make_downstream "$COLLISION_PROJECT"
-COLLISION_DIGEST="$(sha256_file "$COLLISION_PROJECT/.claude/docs/DESIGN.md")"
-COLLISION_ARCHIVE="$COLLISION_PROJECT/.claude/docs/DESIGN.local-preserved.sha256-${COLLISION_DIGEST}.md"
-printf '%s\n' 'wrong archive bytes' > "$COLLISION_ARCHIVE"
-cp -R "$COLLISION_PROJECT" "$COLLISION_SNAPSHOT"
-run_expected_failure \
-  "$COLLISION_PROJECT" \
-  "$COLLISION_TEMPLATE" \
-  "$FIXTURE_ROOT/collision.log"
-grep -F "digest collision or content mismatch" "$FIXTURE_ROOT/collision.log" >/dev/null || \
-  fail "Archive collision diagnostic was missing"
-assert_tree_same "$COLLISION_SNAPSHOT" "$COLLISION_PROJECT" "archive collision preflight project"
 
 printf '%s\n' 'PASS: Python updater and shell wrapper preservation fixtures passed.'

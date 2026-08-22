@@ -215,16 +215,22 @@ Preserved:
 
 - `CLAUDE.md` Zone B and post-boundary Zone C
 - `AGENTS.md` project-specific and post-boundary sections
-- A differing local `.claude/docs/DESIGN.md`, archived as `DESIGN.local-preserved.sha256-<digest>.md`
+- An existing local `.claude/docs/DESIGN.md`; the template copy is used only
+  when the file is absent
+- Downstream-only `.codex` content, including `.codex/plans/`; template
+  `.codex` files are replaced individually, and a template without `.codex`
+  leaves the downstream tree untouched
 - `.claude/tasks/`, `.claude/checkpoints/`, `.claude/plans/`, `.claude/logs/`, `.claude/state/`
 - `.claude/docs/incidents/`, `.claude/docs/reviews/`, `.claude/settings.local.json`
 - Project code and data outside template-managed paths
 
-Each successful update also refreshes exactly these updater support files from the template, without replacing the rest of `scripts/`:
+Each successful update also refreshes exactly these four updater support files
+from the template, without replacing the rest of `scripts/` or `tests/`:
 
 - `scripts/update.py`
-- `scripts/update.sh`
 - `scripts/validate_update_preservation.sh`
+- `tests/test_orchestration/test_update_script.py`
+- `scripts/update.sh`
 
 Migrated away:
 
