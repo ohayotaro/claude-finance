@@ -1,7 +1,6 @@
 # Approval: risk-ledger-accounting-001
 
-Status: PLAN APPROVED by PM (2026-09-05). Implementation remains BLOCKED
-until explicit user approval is recorded below (T3 gate).
+Status: APPROVED for implementation (PM 2026-09-05, user 2026-09-05).
 
 ## PM decisions
 
@@ -61,5 +60,6 @@ until explicit user approval is recorded below (T3 gate).
 
 ## User approval (T3 gate)
 
-Pending. Implementation must not start until this section records the
-user's explicit approval with a date.
+User explicitly approved implementation on 2026-09-05 (interactive session
+prompt: "承認して実装開始"). Implementation phase may start. No trading,
+network, or external side effects are authorized by this approval.
