@@ -1,0 +1,28 @@
+{
+  "exit_code": 0,
+  "finished_at": "2026-09-05T07:15:41.527251+00:00",
+  "git_after": {
+    "branch": "main",
+    "head": "a9918a754a80affc4d2e2555f3af51cd32f01ebe",
+    "status": "?? .claude/tasks/risk-ledger-accounting-001/plan.md\n?? .claude/tasks/risk-ledger-accounting-001/state.json"
+  },
+  "git_before": {
+    "branch": "main",
+    "head": "63efddaf45b9da0eff15321d49d1319e68b620e0",
+    "status": "A  .claude/tasks/risk-ledger-accounting-001/brief.md\nA  .codex/plans/repository-improvement-roadmap.md"
+  },
+  "phase": "plan",
+  "pid": 96438,
+  "requested_effort": "xhigh",
+  "requested_model": null,
+  "resolved_effort": "xhigh",
+  "resolved_model": null,
+  "result_path": ".claude/tasks/risk-ledger-accounting-001/plan.md",
+  "selection_source": {
+    "effort": "default_matrix",
+    "model": "omitted"
+  },
+  "started_at": "2026-09-05T07:04:16.352796+00:00",
+  "status": "succeeded",
+  "task_id": "risk-ledger-accounting-001"
+}
