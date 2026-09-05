@@ -63,3 +63,19 @@ Status: APPROVED for implementation (PM 2026-09-05, user 2026-09-05).
 User explicitly approved implementation on 2026-09-05 (interactive session
 prompt: "承認して実装開始"). Implementation phase may start. No trading,
 network, or external side effects are authorized by this approval.
+
+## Corrections pass approval (2026-09-05)
+
+Fresh review verdict: CHANGES_REQUIRED, eight findings. PM verified the
+Critical and High findings against the diff: frozen `age_seconds` is trusted
+by the validator, observation validation has no maximum age, positions and
+orders borrow the snapshot timestamp, and the checkpoint has no ledger
+binding. All findings are enumerated in brief Addendum 1 (C1-C8) with
+required tests. Corrections are APPROVED within the existing change surface.
+
+- Corrections tier: strong tier at `xhigh` (T3 fail-closed rule; the T1/T2
+  mid-tier corrections economy does not apply).
+- After corrections, a fresh full-scope review runs at `xhigh` before any
+  acceptance decision. The user's T3 implementation approval covers this
+  corrections pass; no new user gate is required because the scope,
+  change surface, and forbidden actions are unchanged.

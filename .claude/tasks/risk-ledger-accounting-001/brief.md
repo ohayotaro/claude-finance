@@ -160,3 +160,63 @@ approved by the PM. Effort is `xhigh` for all phases per the T3 rule.
   restart implications of the choice.
 - Cross-account currency conversion is deferred; the plan should note where
   the hook for it belongs.
+
+## Addendum 1: Corrections for review findings (PM-approved, 2026-09-05)
+
+The fresh review (`review.md`, verdict CHANGES_REQUIRED) enumerated eight
+findings. Each must be fixed in this corrections pass, with the named
+regression test added. The change surface is unchanged.
+
+- C1 (Critical, finding 1): The consumer-side state validator must
+  recompute freshness from `as_of_ts` against the caller's current time
+  (injectable `now`), rejecting any enforcement metric whose recomputed age
+  exceeds `max_age_s`. Stored `age_seconds` is informational only. The
+  validator must also reject a state file whose `published_at` (add it if
+  absent) is older than the health window. Test:
+  `test_metric_consumer_recomputes_age_from_as_of_ts`.
+- C2 (High, finding 2): Observation validation must enforce a maximum age
+  for the account snapshot and ledger batch (bounded by `health_window_s`).
+  A stale observation is a failed cycle: it must not reset `fail_closed`,
+  must not recompute or clear `soft_cap`/`hard_cap`/`margin_emergency`,
+  and must not clear residual strategies. Tests:
+  `test_stale_snapshot_preserves_caps_and_fail_closed`.
+- C3 (High, finding 3): `VenuePosition` and `VenueOrder` responses must
+  carry their own observation timestamp and completeness. Introduce a
+  positions/orders observation container (or fields on a snapshot-level
+  result) with `as_of` and `complete`. Exposure, unrealized PnL, and counts
+  publish provenance from that observation, not from the account snapshot.
+  An incomplete or stale position/order observation is a failed cycle and
+  cannot clear residual strategies. Tests:
+  `test_incomplete_position_observation_cannot_clear_residual`,
+  `test_position_metrics_carry_their_own_observation_age`.
+- C4 (High, finding 4): Bind checkpoint and ledger. The checkpoint must
+  record the ledger cursor/generation it was saved against, and the
+  checkpoint must be saved in the same reconciliation step as drawdown
+  updates, before or atomically with state publication. On restart, if the
+  ledger is ahead of the checkpoint binding, drawdown baselines are treated
+  as unverified and the aggregator stays unhealthy (fail closed) until a
+  fresh authoritative cycle re-establishes them; HWM must never be lowered
+  by the mismatch. The checkpoint must also persist last-known snapshot,
+  exposure, PnL, and provenance so a failed first cycle after restart keeps
+  cached venue state per multi-strategy.md section 6. Tests:
+  `test_crash_between_ledger_commit_and_checkpoint_fails_closed_without_lowering_hwm`,
+  `test_restart_then_venue_failure_retains_cached_state`.
+- C5 (High, finding 5): Configuration validation rejects non-finite floats
+  (`inf`, `nan`) for every numeric field. Test:
+  `test_config_rejects_non_finite_values`.
+- C6 (High, finding 6): Log parsing must treat `UnicodeDecodeError` (and
+  any `ValueError` subclass from decoding) as a malformed line, never
+  raising out of `reconcile_once`. Test:
+  `test_invalid_utf8_log_line_is_malformed_not_fatal`.
+- C7 (Medium, finding 7): Validate `risk_group` as a slug
+  (`^[a-z0-9]+(?:-[a-z0-9]+)*$`) at config load and in `main`, and add a
+  common-path check for the ledger, state, and checkpoint paths under the
+  project root. Test: `test_unsafe_risk_group_is_rejected`.
+- C8 (Low, finding 8): The implementation result must actually list every
+  new test name, the failing-first evidence (which tests failed before the
+  change and why), the modified legacy tests with the reason for each
+  change, and map each AC to test names.
+
+Acceptance criteria are unchanged; C1-C7 are the missing evidence for
+AC4/AC5/AC6/AC7 and C8 is the AC7 evidence gap. Run the full required
+validation again and report before/after counts.
