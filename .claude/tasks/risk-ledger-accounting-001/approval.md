@@ -230,3 +230,10 @@ every definitive startup refusal, and (4) asks the plan phase for a
 decomposition of `src/risk/aggregator.py` into observation validation,
 accounting, persistence, and publication modules so review surfaces
 become bounded. The current working tree is the base for that task.
+
+## Closure (2026-09-06)
+
+Decision: NOT ACCEPTED as a standalone task; superseded by
+`risk-ledger-accounting-002` per user decision on 2026-09-06. The
+uncommitted working-tree implementation produced under this task is the
+base for 002 and is not reverted. No further phases run under 001.
