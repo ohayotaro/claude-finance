@@ -391,3 +391,36 @@ phase must not write `review.md`.
 - G5 (Low, finding 5): Rewrite `implementation-result.md` with no trailing
   whitespace; `git diff --check` must be run last and its exit code
   recorded truthfully.
+
+## Addendum 6: Corrections for sixth review findings (PM-approved, 2026-09-05)
+
+The sixth fresh review (`review-6.md`, CHANGES_REQUIRED) left three
+findings. Fix all three; the change surface is unchanged. The implement
+phase must not write `review.md`.
+
+- H1 (High, finding 1, cut symmetry): The common accounting cut must be
+  two-sided. The enforcement cut is `min(positions_observation.as_of,
+  batch.as_of)`; a position observation newer than the ledger completeness
+  watermark by more than `accounting_cut_max_skew_s` is a failed cycle
+  that preserves caps, `fail_closed`, and residual state, exactly like the
+  older-than case. Where the position cut is within skew but newer than
+  the ledger watermark, realized PnL is cut at the ledger watermark and
+  the unrealized component is labeled with the ledger watermark as its
+  effective cut in provenance. Update ADR-005 wording. Tests:
+  `test_position_cut_newer_than_ledger_watermark_fails_cycle` (the
+  review's 12:00 / 12:01 / 12:00:30 example must not publish healthy zero
+  PnL) and `test_enforcement_cut_is_min_of_position_and_ledger_cuts`.
+- H2 (High, finding 2, Decimal exactness): All ledger accumulation,
+  exposure multiplication, and unrealized summation must run under an
+  isolated `decimal.localcontext()` whose precision is sufficient for the
+  documented bound (exponent/scale 40 implies at least 82 significant
+  digits for products; choose and document the value) with
+  `traps=[Inexact, Rounded, Overflow, InvalidOperation]` so any rounding
+  raises and is handled as a fail-closed validation error, never silent.
+  Ambient global-context changes must not affect results. Tests:
+  `test_ledger_accumulation_is_exact_for_supported_domain` (the review's
+  0.01 example and a shuffled-order equality check) and
+  `test_accounting_is_independent_of_global_decimal_context`.
+- H3 (Low, finding 3, F6 again): Every row of the AC table in
+  `implementation-result.md` must contain only exact test function names
+  (comma separated), no prose descriptions.

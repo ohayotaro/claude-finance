@@ -152,3 +152,13 @@ before acceptance.
 Convergence check: no Critical finding, so the recorded rule permits
 continuing. The PM will report the full cycle history to the user at
 acceptance or at the next pause.
+
+## Sixth corrections pass approval (2026-09-05)
+
+Sixth review (runner-tracked, finished 11:51:53 UTC) verdict:
+CHANGES_REQUIRED, three findings, none Critical: High one-sided accounting
+cut, High Decimal context rounding, Low AC-table naming. Enumerated in
+brief Addendum 6 (H1-H3). Corrections APPROVED, same change surface,
+strong tier at `xhigh`, seventh fresh full-scope review at `xhigh` before
+acceptance. Finding count and severity are decreasing (8 -> 3 -> 4 -> 4 ->
+5 -> 3, no Critical since round 4), which the PM reads as convergence.

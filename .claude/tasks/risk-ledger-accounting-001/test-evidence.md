@@ -203,3 +203,87 @@ proves the disabled, deprecated, and retired lifecycle cases required by F5.
   `test_non_boolean_batch_flags_fail_closed`; the required full commands are
   recorded in `implementation-result.md`.
 - AC8: `test_design_records_ledger_aggregator_exception`.
+
+## New tests added by corrections pass 5
+
+### tests/test_risk/test_aggregator.py
+
+- test_ledger_events_after_position_cut_do_not_double_count_unrealized
+- test_position_cut_older_than_ledger_skew_fails_cycle
+- test_malformed_schema_v3_checkpoint_is_rejected
+- test_ledger_error_during_checkpoint_load_publishes_fail_closed
+
+### tests/test_risk/test_ledger.py
+
+- test_missing_or_inconsistent_ledger_metadata_is_refused
+
+The pass also added one parameter to
+`test_config_rejects_non_finite_values` for
+`accounting_cut_max_skew_s` and one unsafe-value parameter to
+`test_load_aggregator_config_rejects_unsafe_values` for a cut-skew value
+larger than the health window.
+
+## Corrections G1-G5 failing-first evidence
+
+- G1: `test_ledger_events_after_position_cut_do_not_double_count_unrealized`
+  and `test_position_cut_older_than_ledger_skew_fails_cycle` failed before
+  the fix. The former had no cut-aware config/state support, and the latter
+  accepted a position observation older than the configured ledger skew.
+- G2: all three cases of
+  `test_malformed_schema_v3_checkpoint_is_rejected` failed before the fix:
+  a missing financial field defaulted to zero, a string boolean was coerced,
+  and hard cap without soft cap was accepted.
+- G3: `test_ledger_error_during_checkpoint_load_publishes_fail_closed` failed
+  before the fix because `LedgerError` escaped `run_forever` without a state
+  publication.
+- G4: all four cases of
+  `test_missing_or_inconsistent_ledger_metadata_is_refused` failed before the
+  fix because missing generation, cursor, or `as_of` metadata and rows bound
+  to generation zero were accepted.
+- G5: the prior result artifact contained trailing whitespace. The artifact
+  was replaced as one whole file, and the final `git diff --check` result is
+  recorded in `implementation-result.md`.
+- Before: `10 failed in 0.29s`.
+- After targeted corrections: `10 passed in 0.08s`.
+- Final risk suite: `152 passed in 0.73s`.
+- Final fast suite: `321 passed in 7.31s`.
+
+## Corrections pass 5 legacy-test updates
+
+- `test_checkpoint_save_load_roundtrip`: made the fixture's group PnL equal
+  its realized plus unrealized components and added pending-PnL persistence,
+  because schema-v3 now rejects internally inconsistent checkpoints.
+- `test_observation_freshness_uses_post_fetch_clock`: explicitly allows two
+  seconds of accounting-cut skew so it continues to isolate post-fetch clock
+  behavior.
+- `test_position_metrics_carry_their_own_observation_age`: explicitly allows
+  ten seconds of accounting-cut skew so it continues to isolate independent
+  position/order provenance ages.
+- `test_post_commit_ledger_read_failure_does_not_bind_checkpoint_to_new_generation`:
+  updated its monkeypatched ledger method signature for the new optional
+  accounting cutoff; it still raises the intended `LedgerError`.
+
+The three legacy replacements required by D3 remain listed in the earlier
+"Replaced legacy tests" section. No existing safety assertion was weakened.
+
+## AC-to-test map additions for corrections pass 5
+
+- AC1: existing ledger known-value, replay, shuffle, and identity tests remain
+  unchanged and pass.
+- AC2: `test_ledger_events_after_position_cut_do_not_double_count_unrealized`
+  proves realized and unrealized PnL share one accounting cut.
+- AC3: existing disabled, deprecated, retired, residual, and cap tests remain
+  unchanged and pass.
+- AC4: `test_malformed_schema_v3_checkpoint_is_rejected`,
+  `test_ledger_error_during_checkpoint_load_publishes_fail_closed`, and
+  `test_missing_or_inconsistent_ledger_metadata_is_refused` cover checkpoint,
+  startup, and ledger metadata recovery trust.
+- AC5: `test_ledger_events_after_position_cut_do_not_double_count_unrealized`
+  verifies pending ledger telemetry and common-cut enforcement, while the
+  existing metric-source and consumer-freshness tests remain green.
+- AC6: `test_example_risk_groups_config_loads`, the new accounting-cut skew
+  parameters in both config validation tests, and all prior config tests pass.
+- AC7: all tests named above pass with the complete required validation set;
+  exact commands and results are recorded in `implementation-result.md`.
+- AC8: `test_design_records_ledger_aggregator_exception` passes, and ADR-005
+  now documents the common-cut and strict recovery model.
