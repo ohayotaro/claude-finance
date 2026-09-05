@@ -345,3 +345,49 @@ integrity incident note).
   English, plain ASCII, written in one whole-file write, and its AC table
   must name the tests proving each AC. Also append an "AC-to-test map"
   section to `test-evidence.md`.
+
+## Addendum 5: Corrections for fifth review findings (PM-approved, 2026-09-05)
+
+The fifth fresh review (`review-5.md`, CHANGES_REQUIRED) left five
+findings. Fix all five; the change surface is unchanged. The implement
+phase must not write `review.md`.
+
+- G1 (High, finding 1, accounting cut skew): Realized and unrealized PnL
+  must describe one consistent accounting cut. Enforce a common-cut
+  invariant: the daily realized total used for caps only includes ledger
+  events with `occurred_at <= positions_observation.as_of` (events after
+  the position cut are held in a pending bucket that is published as
+  telemetry and folded in on the next cycle whose position cut covers
+  them), and a position observation older than the ledger batch by more
+  than a configurable skew (default: the poll interval) is a failed cycle.
+  Document the invariant in ADR-005. Tests:
+  `test_ledger_events_after_position_cut_do_not_double_count_unrealized`
+  (the review's 12:00/12:01 example must yield -50, not +50) and
+  `test_position_cut_older_than_ledger_skew_fails_cycle`.
+- G2 (High, finding 2, checkpoint trust): Schema-v3 checkpoint loading
+  must validate every field with exact types and required presence (no
+  zero defaults for financial values or counts, no `bool(...)` coercion,
+  `is True`/`is False` only), and enforce invariants (hard cap implies
+  soft cap; drawdown baselines present when `drawdown_baseline_verified`
+  is true; non-negative counts). Any violation is a corrupt checkpoint and
+  follows the existing fail-closed corrupt-checkpoint path. Tests:
+  `test_malformed_schema_v3_checkpoint_is_rejected` parameterized over a
+  missing financial field, a string boolean, and a cap-invariant
+  violation.
+- G3 (High, finding 3, startup containment): `load_checkpoint` and the
+  startup path in `_run_forever_locked` must catch `LedgerError` (and any
+  `Exception` from ledger metadata reads), publish fail-closed state, and
+  either retry on the next cycle or exit non-zero after publishing; no
+  exception may escape `run_forever` without a fail-closed publication.
+  Test: `test_ledger_error_during_checkpoint_load_publishes_fail_closed`.
+- G4 (Medium, finding 4, ledger metadata): Ledger metadata validation must
+  require `generation`, `cursor`, and `as_of` with exact types once the
+  ledger has any row or a non-initial generation; a missing or
+  inconsistent value is `LedgerSchemaError`, never a silent generation
+  zero. A brand-new empty ledger is the only state allowed to initialize
+  metadata. Test: `test_missing_or_inconsistent_ledger_metadata_is_refused`
+  parameterized over missing generation, missing cursor, and generation
+  present with rows but cursor absent.
+- G5 (Low, finding 5): Rewrite `implementation-result.md` with no trailing
+  whitespace; `git diff --check` must be run last and its exit code
+  recorded truthfully.

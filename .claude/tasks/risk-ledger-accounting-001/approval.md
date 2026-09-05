@@ -136,3 +136,19 @@ fail-closed defect class (staleness, binding, boolean strictness, iterable
 consumption, numeric range). The findings are real and bounded, so the
 loop continues; if the fifth review surfaces a new Critical class, the PM
 will pause and report to the user before a further pass.
+
+## Fifth corrections pass approval (2026-09-05)
+
+Fifth review (runner-tracked, finished 11:18:40 UTC) verdict:
+CHANGES_REQUIRED, five findings, none Critical: High accounting-cut skew
+(realized and unrealized PnL from different observation cuts double-count
+a closed position's unrealized profit), High permissive schema-v3
+checkpoint restoration, High uncaught `LedgerError` on startup, Medium
+lenient ledger metadata, Low inaccurate `git diff --check` evidence. All
+enumerated in brief Addendum 5 (G1-G5). Corrections APPROVED, same change
+surface, strong tier at `xhigh`, sixth fresh full-scope review at `xhigh`
+before acceptance.
+
+Convergence check: no Critical finding, so the recorded rule permits
+continuing. The PM will report the full cycle history to the user at
+acceptance or at the next pause.
