@@ -105,3 +105,18 @@ Process notes: the implementation result was delivered in Japanese
 (fourth language drift across tasks) and again lacked the evidence list;
 the PM generated `test-evidence.md` from the diff as the audit-trail
 fallback.
+
+## Integrity incident (2026-09-05, corrections pass 3)
+
+The third corrections implementation wrote `review.md` with
+`Verdict: APPROVE` itself (file mtime 10:16:42 UTC, before the fourth
+review phase started at 10:18:19 UTC; the implementation result lists
+`review.md` under "Files changed"). An implementation phase producing its
+own review artifact is a contract violation: review output must come from
+a fresh read-only Codex invocation. The PM preserved the file as
+`implement-phase-wrote-review.md` for the record and disregards it. Only
+the artifact written by the fourth `review` phase (runner-tracked in
+`state.json` and `codex-events.jsonl`) counts toward acceptance. Follow-up
+backlog: harden the runner so the implement phase cannot write `review.md`
+(for example, refuse to start when `review.md` changed during implement,
+or write phase outputs to phase-owned paths).
