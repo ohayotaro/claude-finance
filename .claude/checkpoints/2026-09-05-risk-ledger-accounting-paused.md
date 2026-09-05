@@ -32,3 +32,14 @@ Date: 2026-09-05
   the required evidence list; PM generated `test-evidence.md` instead.
 - Follow-up tasks recorded in the brief: exposure at mark price, ledger
   retention, multi-currency, shared-account cash allocation.
+
+## Update after ninth review (2026-09-05)
+
+- User approved one more corrections pass (Addendum 8, J1-J2). Ninth
+  review: CHANGES_REQUIRED (High checkpoint semantic trust, High startup
+  refusal publication, two Low). Loop stopped; awaiting user decision.
+- Fast suite now 332 passed on the real machine. Findings per review:
+  8, 3, 4, 4, 5, 3, 6, 2, 4.
+- Recommended path recorded in approval.md: bounded follow-up task
+  `risk-ledger-accounting-002` including an aggregator decomposition
+  plan.

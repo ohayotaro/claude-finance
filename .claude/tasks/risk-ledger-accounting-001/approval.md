@@ -205,3 +205,28 @@ Addendum 8 (J1-J2) supersedes the H1 within-skew allowance with a strict
 ledger-watermark enforcement cut. Corrections APPROVED, same change
 surface, strong tier at `xhigh`, ninth fresh full-scope review at `xhigh`.
 After the ninth review the PM reports to the user regardless of verdict.
+
+## Pause after ninth review (2026-09-05)
+
+Ninth review (runner-tracked, finished 14:03:09 UTC) verdict:
+CHANGES_REQUIRED: High checkpoint semantic trust (cached PnL and cap
+flags are not recomputed against the bound ledger on restore), High
+startup refusals other than NullVenue leave a prior healthy state file in
+place, Low J2 evidence format, Low malformed-log warning lacks the byte
+offset required by multi-strategy.md section 6.
+
+Status: NOT ACCEPTED. Per the user-approved single extra pass, the PM
+stops here and reports. Code remains uncommitted in the working tree; PM
+independent validation after corrections pass 8: fast suite 332 passed,
+ruff, mypy, registry audit, git diff --check all clean.
+
+PM assessment: nine review rounds each found real but progressively
+narrower fail-closed gaps in a module that has grown past 3,000 lines.
+Recommended next step is a bounded T3 follow-up task
+(`risk-ledger-accounting-002`) that (1) enumerates the four open
+findings, (2) adds a checkpoint semantic-integrity check by recomputing
+ledger totals and cap flags on restore, (3) publishes fail-closed state on
+every definitive startup refusal, and (4) asks the plan phase for a
+decomposition of `src/risk/aggregator.py` into observation validation,
+accounting, persistence, and publication modules so review surfaces
+become bounded. The current working tree is the base for that task.

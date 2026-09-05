@@ -404,3 +404,42 @@ The three legacy replacements required by D3 remain listed in the earlier
   `test_allowed_future_skew_publishes_healthy_and_validates`, and
   `test_main_null_venue_refusal_publishes_fail_closed_state`.
 - AC8: `test_design_records_ledger_aggregator_exception`.
+
+## New tests added by corrections pass 8
+
+### tests/test_risk/test_aggregator.py
+
+- test_position_newer_than_ledger_watermark_with_intervening_close_fails_closed
+- test_adapter_supplied_positions_as_of_cut_are_accepted
+
+## Corrections J1-J2 failing-first evidence
+
+- J1: `test_position_newer_than_ledger_watermark_with_intervening_close_fails_closed`
+  failed before the fix because the within-skew 12:00:30 flat position view was
+  accepted against a ledger complete only through 12:00; it cleared cached
+  loss caps and advanced the ledger despite the unobserved 12:00:20 close.
+  `test_adapter_supplied_positions_as_of_cut_are_accepted` failed because the
+  position observation contract did not provide `as_of_cut`. Both passed after
+  strict positive-skew rejection and exact ledger-watermark cut binding were
+  added, with the true position observation timestamp retained in provenance.
+- J2: `implementation-result.md` was replaced in one whole-file operation.
+  Every AC evidence cell contains only exact, comma-separated test function
+  names, including the specifically required AC4, AC5, and AC7 regressions.
+- Before targeted fixes: `2 failed, 141 deselected in 0.15s`.
+- After targeted fixes: `2 passed, 141 deselected in 0.11s`.
+- Corrections-pass baseline fast suite: `330 passed in 6.56s`.
+- Final risk suite: `163 passed in 0.65s`.
+- Final fast suite: `332 passed in 6.55s`.
+
+## AC-to-test map additions for corrections pass 8
+
+- AC2: `test_position_newer_than_ledger_watermark_with_intervening_close_fails_closed`
+  and `test_adapter_supplied_positions_as_of_cut_are_accepted` prove that a
+  later flat position cannot hide gap-period realized loss and that aligned
+  historical position values contribute at the ledger watermark.
+- AC5: `test_adapter_supplied_positions_as_of_cut_are_accepted` proves that
+  unrealized PnL publishes the true position observation timestamp while the
+  composite group PnL publishes the ledger enforcement cut.
+- AC7: `test_position_newer_than_ledger_watermark_with_intervening_close_fails_closed`
+  and `test_adapter_supplied_positions_as_of_cut_are_accepted` are the two
+  regressions added by this pass and both pass in the complete validation set.
