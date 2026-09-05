@@ -287,3 +287,55 @@ The three legacy replacements required by D3 remain listed in the earlier
   exact commands and results are recorded in `implementation-result.md`.
 - AC8: `test_design_records_ledger_aggregator_exception` passes, and ADR-005
   now documents the common-cut and strict recovery model.
+
+## New tests added by corrections pass 6
+
+### tests/test_risk/test_aggregator.py
+
+- test_position_cut_newer_than_ledger_watermark_fails_cycle
+- test_enforcement_cut_is_min_of_position_and_ledger_cuts
+- test_accounting_is_independent_of_global_decimal_context
+
+### tests/test_risk/test_ledger.py
+
+- test_ledger_accumulation_is_exact_for_supported_domain
+
+## Corrections H1-H3 failing-first evidence
+
+- H1: `test_position_cut_newer_than_ledger_watermark_fails_cycle` failed
+  before the fix because a position observation one minute newer than the
+  ledger watermark reset fail-closed state, cleared the cap and residual
+  strategy, and advanced the ledger. It passed after accounting-cut skew was
+  enforced symmetrically. `test_enforcement_cut_is_min_of_position_and_ledger_cuts`
+  failed because realized PnL was queried through the newer position cut and
+  unrealized provenance used that newer timestamp. It passed after both use
+  `min(positions_observation.as_of, ledger_batch.as_of)` for enforcement.
+- H2: `test_ledger_accumulation_is_exact_for_supported_domain` failed with
+  both shuffled totals equal to `0` instead of the exact `0.01` under the
+  default Decimal context. `test_accounting_is_independent_of_global_decimal_context`
+  failed because a six-digit ambient context rounded exposure and erased the
+  unrealized `0.01`. Both passed after the 256-digit trapping context was
+  applied to ledger and aggregator accounting.
+- H3: `implementation-result.md` was replaced as one whole file. Every AC
+  evidence cell contains only exact, comma-separated test function names.
+- Before: `4 failed in 0.18s`.
+- After targeted corrections: `4 passed in 0.05s`.
+- Final risk suite: `156 passed in 0.62s`.
+- Fast suite baseline before pass 6: `321 passed in 6.79s`.
+- Final fast suite: `325 passed in 6.82s`.
+
+## AC-to-test map additions for corrections pass 6
+
+- AC1: `test_ledger_accumulation_is_exact_for_supported_domain` proves exact
+  ledger accumulation and shuffled-order equality throughout the supported
+  Decimal domain.
+- AC2: `test_position_cut_newer_than_ledger_watermark_fails_cycle` and
+  `test_enforcement_cut_is_min_of_position_and_ledger_cuts` prove the
+  two-sided common accounting cut and effective-cut provenance.
+- AC5: `test_enforcement_cut_is_min_of_position_and_ledger_cuts` proves that
+  composite realized and unrealized PnL provenance uses the enforcement cut
+  while exposure retains the position-observation timestamp.
+- AC7: `test_accounting_is_independent_of_global_decimal_context` proves that
+  enforcement accounting does not inherit ambient Decimal precision.
+- AC8: `test_design_records_ledger_aggregator_exception` remains green, and
+  ADR-005 now records the symmetric common-cut and exact-arithmetic model.

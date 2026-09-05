@@ -162,3 +162,17 @@ brief Addendum 6 (H1-H3). Corrections APPROVED, same change surface,
 strong tier at `xhigh`, seventh fresh full-scope review at `xhigh` before
 acceptance. Finding count and severity are decreasing (8 -> 3 -> 4 -> 4 ->
 5 -> 3, no Critical since round 4), which the PM reads as convergence.
+
+## Seventh corrections pass approval and stop rule (2026-09-05)
+
+Seventh review (runner-tracked, finished 12:16:13 UTC) verdict:
+CHANGES_REQUIRED, six findings, none Critical: High derived-value domain
+closure, High ambient rounding in cap decisions, Medium allowed-skew
+health mismatch, Medium CLI NullVenue publication gap, Low AC-table
+naming, Low config comment. Enumerated in brief Addendum 7 (I1-I6).
+Corrections APPROVED, same change surface, strong tier at `xhigh`, eighth
+fresh full-scope review at `xhigh` before acceptance.
+
+Stop rule: if the eighth review returns CHANGES_REQUIRED, the PM pauses
+the loop and reports the full cycle history and options to the user
+before any further pass, regardless of severity.

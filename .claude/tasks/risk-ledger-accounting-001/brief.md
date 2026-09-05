@@ -424,3 +424,42 @@ phase must not write `review.md`.
 - H3 (Low, finding 3, F6 again): Every row of the AC table in
   `implementation-result.md` must contain only exact test function names
   (comma separated), no prose descriptions.
+
+## Addendum 7: Corrections for seventh review findings (PM-approved, 2026-09-05)
+
+The seventh fresh review (`review-7.md`, CHANGES_REQUIRED) left six
+findings. Fix all six; the change surface is unchanged. The implement
+phase must not write `review.md`.
+
+- I1 (High, finding 1, domain closure): Separate the input bound from the
+  derived-value bound. Inputs keep the documented bound (adjusted exponent
+  40); derived and persisted values (exposure, daily totals, drawdown,
+  checkpoint fields) use a documented wider bound (for example adjusted
+  exponent 100, comfortably inside the 256-digit context) so every value
+  computable from valid inputs is storable, restorable, and queryable.
+  Update ADR-005 and the ledger/aggregator docstrings. Tests:
+  `test_exposure_from_boundary_inputs_round_trips_through_checkpoint` and
+  `test_daily_total_from_boundary_ledger_entries_is_queryable`.
+- I2 (High, finding 2, ambient rounding in caps): `determine_signals`,
+  drawdown percentage arithmetic, and checkpoint PnL-consistency
+  arithmetic must run inside the isolated exact context. Cap comparisons
+  must be exact: compare `-pnl * 100` against `threshold * balance` (or
+  equivalent cross-multiplication) rather than dividing, so no rounding
+  occurs. Test: `test_hard_cap_boundary_is_exact_without_ambient_rounding`
+  (the review's `-4.9999999999999999999999999999` / `100` example must
+  not set `hard_cap`).
+- I3 (Medium, finding 3, allowed skew health): `_is_healthy` and the
+  consumer validator must accept negative ages down to
+  `-future_skew_tolerance_s` (published in the state so consumers can
+  apply the same bound) and reject beyond it. Test:
+  `test_allowed_future_skew_publishes_healthy_and_validates`.
+- I4 (Medium, finding 4, CLI NullVenue path): The `main` NullVenue
+  refusal for live-capable strategies must publish fail-closed unhealthy
+  state before returning non-zero, using the same publication path as
+  `run_forever`. Test: `test_main_null_venue_refusal_publishes_fail_closed_state`.
+- I5 (Low, finding 5, H3 again): Every AC row in
+  `implementation-result.md`, including AC4, AC6, AC7, and AC8, contains
+  only exact comma-separated test function names. For AC7, list the
+  regression tests added in this pass.
+- I6 (Low, finding 6): Fix the `accounting_cut_max_skew_s` comment in
+  `config/risk_groups.toml` to describe the symmetric rule.
