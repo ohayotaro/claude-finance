@@ -120,3 +120,19 @@ the artifact written by the fourth `review` phase (runner-tracked in
 backlog: harden the runner so the implement phase cannot write `review.md`
 (for example, refuse to start when `review.md` changed during implement,
 or write phase outputs to phase-owned paths).
+
+## Fourth corrections pass approval (2026-09-05)
+
+Genuine fourth review (runner-tracked, finished 10:45:04 UTC) verdict:
+CHANGES_REQUIRED, four findings: Critical one-shot iterable consumption,
+High checkpoint refusal still publishing healthy state, High post-commit
+Decimal overflow, Low artifact language and AC map. PM added F1
+(unconditional `fcntl` import breaks Windows CI). All enumerated in brief
+Addendum 4 (F1-F6). Corrections APPROVED, same change surface, strong tier
+at `xhigh`, fifth fresh full-scope review at `xhigh` before acceptance.
+
+PM note on convergence: each review round has surfaced a distinct
+fail-closed defect class (staleness, binding, boolean strictness, iterable
+consumption, numeric range). The findings are real and bounded, so the
+loop continues; if the fifth review surfaces a new Critical class, the PM
+will pause and report to the user before a further pass.

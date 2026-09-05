@@ -298,3 +298,50 @@ findings. Fix all four; the change surface is unchanged.
   (b) write `implementation-result.md` in English, plain ASCII, via a
   single whole-file write (not an incremental patch), and reference
   `test-evidence.md` instead of claiming the list is inline.
+
+## Addendum 4: Corrections for fourth review findings plus PM finding (PM-approved, 2026-09-05)
+
+The fourth fresh review (`review-4.md`, CHANGES_REQUIRED) left four
+findings; the PM found one more. Fix all six; the change surface is
+unchanged. The implement phase must not write `review.md` (see approval
+integrity incident note).
+
+- F1 (PM, High): `src/risk/aggregator.py` imports `fcntl` unconditionally
+  at module top. CI runs the fast suite on `windows-latest`, and `main`
+  explicitly supports Windows (SIGBREAK). Make the writer lock portable:
+  `fcntl.flock` on POSIX and `msvcrt.locking` on Windows behind a
+  platform-conditional import, with the same fail-closed
+  `AggregatorWriterLockError` semantics. The module must import on both
+  platforms. Test: `test_writer_lock_backend_selected_per_platform`
+  (monkeypatch `sys.platform` and the backend hooks; must not require a
+  real Windows host).
+- F2 (Critical, finding 1): Materialize every venue collection
+  (positions, orders, fills, cash events) exactly once into an immutable
+  tuple before validation, and reject non-sequence or one-shot inputs fail
+  closed. Reuse the materialized tuples for accounting. Tests:
+  `test_generator_position_observation_is_materialized_once`,
+  `test_generator_ledger_batch_is_materialized_once` (generators must
+  yield the same accounting as tuples; nothing disappears and the cursor
+  only advances with the records inserted).
+- F3 (High, finding 2): `save_checkpoint` returns a result or raises; a
+  ledger-binding mismatch must set `fail_closed`, invalidate provenance
+  for cached PnL/exposure, and cause `_is_healthy` to be false in the
+  published state. Test:
+  `test_checkpoint_binding_mismatch_publishes_unhealthy_state`.
+- F4 (High, finding 3): Validate `Decimal` magnitude and exponent ranges
+  for size, price, PnL, fees, balance, equity, and margin (reject values
+  outside a documented bound, for example `abs(adjusted()) > 40`), and
+  wrap all post-commit accounting in the same fail-closed path as D2 so no
+  exception escapes `reconcile_once` or `run_forever` without publishing
+  fail-closed state. Tests:
+  `test_extreme_finite_decimal_is_rejected_before_commit`,
+  `test_post_commit_accounting_exception_publishes_fail_closed`.
+- F5 (AC3 coverage gap): Split the combined residual test so deprecated
+  strategy position PnL and cap contribution, and retired strategy
+  residual behavior, are each proven independently. Tests:
+  `test_deprecated_strategy_position_pnl_counts_toward_caps`,
+  `test_retired_strategy_residual_order_counts_until_flat`.
+- F6 (Low, finding 4, E4 again): `implementation-result.md` must be
+  English, plain ASCII, written in one whole-file write, and its AC table
+  must name the tests proving each AC. Also append an "AC-to-test map"
+  section to `test-evidence.md`.
