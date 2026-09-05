@@ -176,3 +176,24 @@ fresh full-scope review at `xhigh` before acceptance.
 Stop rule: if the eighth review returns CHANGES_REQUIRED, the PM pauses
 the loop and reports the full cycle history and options to the user
 before any further pass, regardless of severity.
+
+## Pause after eighth review (2026-09-05)
+
+Eighth review (runner-tracked, finished 12:43:39 UTC) verdict:
+CHANGES_REQUIRED with one High and one Low finding. Per the recorded stop
+rule the PM paused the loop and is reporting to the user.
+
+Remaining High: when the position snapshot is newer than the ledger
+completeness watermark (within the allowed skew), a loss realized in the
+gap is absent from both ledger PnL (cut at the watermark) and unrealized
+PnL (the later snapshot is flat). Root cause is the Addendum 6 H1 wording
+that allowed a within-skew newer position cut; the reviewer's proposed
+fix is to fail closed whenever the position cut is newer than the ledger
+watermark unless the adapter supplies positions as of the enforcement
+cut. Remaining Low: implementation-result AC table still not test-names
+only.
+
+Status: NOT ACCEPTED. Code remains uncommitted in the working tree. PM
+independent validation on the real machine after corrections pass 7:
+fast suite 330 passed, ruff, mypy, registry audit, git diff --check all
+clean.

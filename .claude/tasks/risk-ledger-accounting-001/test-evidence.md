@@ -339,3 +339,68 @@ The three legacy replacements required by D3 remain listed in the earlier
   enforcement accounting does not inherit ambient Decimal precision.
 - AC8: `test_design_records_ledger_aggregator_exception` remains green, and
   ADR-005 now records the symmetric common-cut and exact-arithmetic model.
+
+## New tests added by corrections pass 7
+
+### tests/test_risk/test_aggregator.py
+
+- test_hard_cap_boundary_is_exact_without_ambient_rounding
+- test_main_null_venue_refusal_publishes_fail_closed_state
+- test_exposure_from_boundary_inputs_round_trips_through_checkpoint
+- test_allowed_future_skew_publishes_healthy_and_validates
+
+### tests/test_risk/test_ledger.py
+
+- test_daily_total_from_boundary_ledger_entries_is_queryable
+
+## Corrections I1-I6 failing-first evidence
+
+- I1: `test_exposure_from_boundary_inputs_round_trips_through_checkpoint`
+  failed before the fix because a valid `1e40 * 1e40` exposure was written to
+  the checkpoint and then rejected by the input-only `1e40` bound on reload.
+  `test_daily_total_from_boundary_ledger_entries_is_queryable` failed because
+  ten valid `1e40` fills committed but their `1e41` total was rejected by the
+  same input-only bound. Both passed after input and derived domains were
+  separated at adjusted exponent/scale 40 and 100 respectively.
+- I2: `test_hard_cap_boundary_is_exact_without_ambient_rounding` failed before
+  the fix because ambient precision rounded a loss just below five percent up
+  to the hard-cap boundary. It passed after cap checks switched to exact
+  cross-multiplication inside the isolated context.
+- I3: `test_allowed_future_skew_publishes_healthy_and_validates` failed before
+  the fix because both producer health and the consumer rejected a venue cut
+  one second ahead despite a two-second configured tolerance. It passed after
+  both paths applied the published tolerance symmetrically.
+- I4: `test_main_null_venue_refusal_publishes_fail_closed_state` failed before
+  the fix because `main` returned non-zero while leaving a prior healthy state
+  untouched. It passed after the startup refusal used atomic state publication
+  to replace that file with fail-closed, non-authoritative state.
+- I5: `implementation-result.md` was replaced as one whole file. Every AC test
+  cell contains only exact comma-separated test function names.
+- I6: the example configuration now documents accounting-cut skew as symmetric.
+- Before: `5 failed in 0.21s`.
+- After targeted corrections: `5 passed in 0.06s`.
+- Final risk suite: `161 passed in 0.69s`.
+- Fast suite baseline before corrections pass 7: `325 passed in 7.22s`.
+- Final fast suite: `330 passed in 7.22s`.
+
+## Corrections pass 7 legacy-test update
+
+- `test_utc_day_boundary_resets_and_hwm_survives`: replaced an ambient-context
+  drawdown calculation in the expected value with the specified exact value
+  `-2.86`. Repeating drawdown ratios are now deterministically rounded to the
+  repository-standard two decimal places; the day-boundary, HWM-survival, and
+  drawdown assertions remain intact.
+
+## AC-to-test map additions for corrections pass 7
+
+- AC1: `test_daily_total_from_boundary_ledger_entries_is_queryable`.
+- AC4: `test_exposure_from_boundary_inputs_round_trips_through_checkpoint`.
+- AC5: `test_allowed_future_skew_publishes_healthy_and_validates` and
+  `test_main_null_venue_refusal_publishes_fail_closed_state`.
+- AC6: `test_example_risk_groups_config_loads`.
+- AC7: `test_hard_cap_boundary_is_exact_without_ambient_rounding`,
+  `test_exposure_from_boundary_inputs_round_trips_through_checkpoint`,
+  `test_daily_total_from_boundary_ledger_entries_is_queryable`,
+  `test_allowed_future_skew_publishes_healthy_and_validates`, and
+  `test_main_null_venue_refusal_publishes_fail_closed_state`.
+- AC8: `test_design_records_ledger_aggregator_exception`.
