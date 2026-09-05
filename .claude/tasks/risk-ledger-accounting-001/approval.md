@@ -197,3 +197,11 @@ Status: NOT ACCEPTED. Code remains uncommitted in the working tree. PM
 independent validation on the real machine after corrections pass 7:
 fast suite 330 passed, ruff, mypy, registry audit, git diff --check all
 clean.
+
+## Eighth corrections pass approval (2026-09-05)
+
+User decision (interactive prompt): run one more corrections pass. Brief
+Addendum 8 (J1-J2) supersedes the H1 within-skew allowance with a strict
+ledger-watermark enforcement cut. Corrections APPROVED, same change
+surface, strong tier at `xhigh`, ninth fresh full-scope review at `xhigh`.
+After the ninth review the PM reports to the user regardless of verdict.

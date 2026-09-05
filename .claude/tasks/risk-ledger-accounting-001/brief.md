@@ -463,3 +463,29 @@ phase must not write `review.md`.
   regression tests added in this pass.
 - I6 (Low, finding 6): Fix the `accounting_cut_max_skew_s` comment in
   `config/risk_groups.toml` to describe the symmetric rule.
+
+## Addendum 8: Corrections for eighth review findings (PM-approved, user-approved, 2026-09-05)
+
+The eighth fresh review (`review-8.md`, CHANGES_REQUIRED) left two
+findings. The user approved one final corrections pass. Fix both; the
+change surface is unchanged. The implement phase must not write
+`review.md`.
+
+- J1 (High, finding 1): Supersede the Addendum 6 H1 "within skew but
+  newer" allowance. A position observation whose `as_of` is newer than
+  the ledger completeness watermark (`batch.as_of`) by any amount is a
+  failed cycle that preserves caps, `fail_closed`, and residual state,
+  unless the adapter explicitly supplies positions as of the enforcement
+  cut (an optional `as_of_cut` on the position observation equal to the
+  ledger watermark). The enforcement cut is therefore always the ledger
+  watermark, and unrealized provenance carries the true position
+  observation timestamp. Update ADR-005, the config comment, and the H1
+  tests accordingly. Tests:
+  `test_position_newer_than_ledger_watermark_with_intervening_close_fails_closed`
+  (the review's 12:00 / 12:00:20 loss / 12:00:30 flat example must not
+  publish healthy zero PnL) and
+  `test_adapter_supplied_positions_as_of_cut_are_accepted`.
+- J2 (Low, finding 2): The AC table in `implementation-result.md` must
+  contain only exact comma-separated test function names in every row,
+  including the rotation, truncation, and late-precheckpoint tests in AC4,
+  the log-source/stale consumer test in AC5, and the J1 tests in AC7.
