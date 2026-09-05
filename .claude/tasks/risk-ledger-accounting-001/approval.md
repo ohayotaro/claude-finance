@@ -79,3 +79,13 @@ required tests. Corrections are APPROVED within the existing change surface.
   acceptance decision. The user's T3 implementation approval covers this
   corrections pass; no new user gate is required because the scope,
   change surface, and forbidden actions are unchanged.
+
+## Second corrections pass approval (2026-09-05)
+
+Second review verdict: CHANGES_REQUIRED, three findings (Critical pre-fetch
+clock, High post-commit ledger failure binding, Low C8 evidence). PM
+verified the first two against the diff. All are enumerated in brief
+Addendum 2 (D1-D3) with required tests. Corrections APPROVED, same change
+surface, strong tier at `xhigh`. A third fresh full-scope review at
+`xhigh` follows before acceptance. The exposure mark-price note is logged
+as follow-up work outside this task.

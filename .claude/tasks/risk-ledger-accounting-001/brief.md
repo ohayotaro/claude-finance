@@ -220,3 +220,41 @@ regression test added. The change surface is unchanged.
 Acceptance criteria are unchanged; C1-C7 are the missing evidence for
 AC4/AC5/AC6/AC7 and C8 is the AC7 evidence gap. Run the full required
 validation again and report before/after counts.
+
+## Addendum 2: Corrections for second review findings (PM-approved, 2026-09-05)
+
+The second fresh review (`review-2.md`, CHANGES_REQUIRED) left three
+findings. Fix all three; the change surface is unchanged.
+
+- D1 (Critical): Observation freshness must be evaluated against a clock
+  read after the venue fetches complete, not the `now_utc` captured before
+  the calls. Introduce an injectable clock callable (default
+  `lambda: datetime.now(UTC)`), read it once after all venue I/O for the
+  freshness checks, and keep a small configurable future-skew tolerance
+  for adapter timestamps. Tests:
+  `test_observation_freshness_uses_post_fetch_clock` (an observation
+  timestamped during the call is accepted) and
+  `test_observation_that_ages_out_during_fetch_is_rejected` (an observation
+  fresh at cycle start but stale after slow I/O is a failed cycle that
+  preserves caps and residual strategies).
+- D2 (High): Any `LedgerError` raised after the ledger transaction commits
+  (for example the daily-total query) must force the cycle to fail closed,
+  and the checkpoint must not be saved with a ledger binding newer than the
+  state it describes. Either skip the checkpoint save on a failed cycle or
+  bind the checkpoint to the generation that produced the cached state.
+  On restart the mismatch must be detected and the aggregator stays
+  unhealthy until a fresh authoritative cycle. Test:
+  `test_post_commit_ledger_read_failure_does_not_bind_checkpoint_to_new_generation`
+  covering commit -> total-read failure -> checkpoint attempt -> restart.
+- D3 (Low, C8 again): Rewrite `implementation-result.md` in a single
+  write operation (the previous pass failed on a multi-operation patch to
+  this file; see `codex-implement.stderr.txt`). It must contain: every new
+  test name in `tests/test_risk/`, the failing-first evidence per group,
+  the three replaced legacy tests (`test_unrealized_pnl_no_double_count`,
+  `test_realized_pnl_accumulates_across_cycles`,
+  `test_restart_loads_checkpoint_no_replay`) each with its replacement and
+  reason, and an AC-to-test-name map.
+
+Recorded for a follow-up task, not this one: exposure uses
+`size * entry_price`; venue mark or current notional should replace it
+once an adapter supplies it.
