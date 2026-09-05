@@ -258,3 +258,43 @@ findings. Fix all three; the change surface is unchanged.
 Recorded for a follow-up task, not this one: exposure uses
 `size * entry_price`; venue mark or current notional should replace it
 once an adapter supplies it.
+
+## Addendum 3: Corrections for third review findings (PM-approved, 2026-09-05)
+
+The third fresh review (`review-3.md`, CHANGES_REQUIRED) left four
+findings. Fix all four; the change surface is unchanged.
+
+- E1 (High, D1 incomplete): No code path may evaluate observation
+  freshness against a pre-fetch timestamp. Remove the fallback that builds
+  `clock` from a fixed `now_utc`; `now_utc` (if kept) is only the cycle
+  start used for logging and UTC-day attribution, and freshness always
+  uses `clock()` read after venue I/O, defaulting to `datetime.now(UTC)`.
+  Update callers and tests so determinism comes from injecting `clock`.
+  Test: `test_default_clock_path_rejects_observation_that_ages_out_during_fetch`
+  (no explicit clock supplied by the test beyond monkeypatching the module
+  clock source; must fail before the fix).
+- E2 (High, D2 incomplete): `save_checkpoint` must not reread and adopt
+  the latest ledger binding. It must persist the binding recorded by the
+  reconciliation cycle that produced the cached state, and refuse (log
+  CRITICAL, skip save) when the ledger's current binding differs from that
+  recorded binding. Additionally take an exclusive advisory lock on the
+  ledger directory for the lifetime of `run_forever` so a second aggregator
+  process for the same risk group fails to start (single-writer). Tests:
+  `test_checkpoint_save_refuses_when_ledger_advanced_concurrently`,
+  `test_second_aggregator_instance_for_same_group_is_refused`.
+- E3 (High): `authoritative` and `complete` on observations and ledger
+  batches must be validated as exact booleans (`is True`, and reject any
+  non-`bool` type with a validation error) in both `src/risk/aggregator.py`
+  and `src/risk/ledger.py`. Tests:
+  `test_non_boolean_completeness_flag_fails_closed` (aggregator) and
+  `test_non_boolean_batch_flags_fail_closed` (ledger), covering the string
+  `"false"`, integer `1`, and `None`.
+- E4 (Low, C8/D3 again): The PM has generated
+  `.claude/tasks/risk-ledger-accounting-001/test-evidence.md` from the
+  diff (new test names, replaced legacy tests with reasons, counts).
+  Codex must: (a) append to that file a "Failing-first evidence" section
+  listing, per corrections group (C1-C7, D1-D2, E1-E3), which named tests
+  failed before the fix and passed after, with the pytest summary lines;
+  (b) write `implementation-result.md` in English, plain ASCII, via a
+  single whole-file write (not an incremental patch), and reference
+  `test-evidence.md` instead of claiming the list is inline.

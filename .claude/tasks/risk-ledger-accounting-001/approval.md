@@ -89,3 +89,19 @@ Addendum 2 (D1-D3) with required tests. Corrections APPROVED, same change
 surface, strong tier at `xhigh`. A third fresh full-scope review at
 `xhigh` follows before acceptance. The exposure mark-price note is logged
 as follow-up work outside this task.
+
+## Third corrections pass approval (2026-09-05)
+
+Third review verdict: CHANGES_REQUIRED, four findings. PM verified all
+three High findings in the code (fixed pre-fetch clock fallback,
+`save_checkpoint` adopting the latest ledger binding, truthiness checks on
+`authoritative`/`complete`). Enumerated in brief Addendum 3 (E1-E4).
+Corrections APPROVED, same change surface, strong tier at `xhigh`, with a
+fourth fresh full-scope review at `xhigh` before acceptance. The single-
+writer lock in E2 is a PM addition responding to the review's residual
+risk note on concurrent writers; it stays inside `src/risk/aggregator.py`.
+
+Process notes: the implementation result was delivered in Japanese
+(fourth language drift across tasks) and again lacked the evidence list;
+the PM generated `test-evidence.md` from the diff as the audit-trail
+fallback.
