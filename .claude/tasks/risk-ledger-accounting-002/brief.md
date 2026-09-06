@@ -131,3 +131,29 @@ Effort `xhigh` for all phases.
   behavior change is reviewable separately from the moves, with the
   decomposition as a second implementation phase under the same approved
   plan.
+
+## Addendum 1: Corrections for review findings (PM-approved, 2026-09-06)
+
+The fresh review (`review-1.md`, CHANGES_REQUIRED) left three findings.
+This is the single corrections pass agreed with the user; fix all three.
+The implement phase must not write `review.md`.
+
+- K1 (Medium, finding 1): In `src/risk/persistence.py` checkpoint
+  validation, all Decimal comparisons and `abs` operations (net vs gross
+  exposure and any similar invariant) must run inside the isolated exact
+  arithmetic context (`copy_abs()` or the context). Tests:
+  `test_checkpoint_exposure_invariant_is_exact_at_high_precision`
+  (equal net/gross `1.2345678901234567890123456789` restores) and
+  `test_checkpoint_net_exceeding_gross_is_rejected_without_rounding`.
+- K2 (Medium, finding 2): The PM generated
+  `.claude/tasks/risk-ledger-accounting-002/test-evidence.md` (moved-test
+  mapping from the task-001 inventory to the owning file, and the list of
+  tests new in 002). Codex must append to it: (a) a "Pure-move hunks"
+  section identifying, per extracted module, which source ranges were
+  moved verbatim from `aggregator.py` and which were edited (with the
+  reason), and (b) the failing-first results for the K1 tests.
+- K3 (Low, finding 3): Rewrite `implementation-result.md` in one
+  whole-file write, English, plain ASCII (no em dashes), with an AC table
+  whose evidence cells contain only exact comma-separated test function
+  names, and reference `test-evidence.md` for the inventory instead of
+  linking to itself.

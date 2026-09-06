@@ -61,3 +61,15 @@ User explicitly approved implementation on 2026-09-06 (interactive
 prompt: "approve and start implementation"). Loop policy agreed with the
 user: at most one corrections pass after the first review, then report.
 No trading, network, or external side effects are authorized.
+
+## Corrections pass approval (2026-09-06)
+
+First review (runner-tracked, finished 01:35:52 UTC) verdict:
+CHANGES_REQUIRED, no High or Critical: Medium checkpoint exposure
+invariant computed outside the exact Decimal context, Medium missing
+inventory/move evidence, Low artifact format. PM verified the inventory
+independently (all 70 task-001 tests present except the three
+intentionally replaced in 001) and wrote `test-evidence.md`. Brief
+Addendum 1 (K1-K3) is APPROVED as the single corrections pass agreed
+with the user; strong tier at `xhigh`; a second fresh full-scope review
+at `xhigh` follows, after which the PM reports regardless of verdict.
