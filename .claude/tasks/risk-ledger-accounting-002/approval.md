@@ -73,3 +73,26 @@ intentionally replaced in 001) and wrote `test-evidence.md`. Brief
 Addendum 1 (K1-K3) is APPROVED as the single corrections pass agreed
 with the user; strong tier at `xhigh`; a second fresh full-scope review
 at `xhigh` follows, after which the PM reports regardless of verdict.
+
+## Pause after second review (2026-09-06)
+
+Second review (runner-tracked, finished 01:58:15 UTC) verdict:
+CHANGES_REQUIRED: High null-day checkpoint bypass (a reconciled
+checkpoint with `current_utc_date=null` and zero cached PnL skips ledger
+recomputation; reproduced by the reviewer as a restored `-600` loss with
+`hard_cap` cleared after one venue failure), Low implementation-result
+lacks the AC table and module line counts.
+
+Status: NOT ACCEPTED. Per the single-corrections-pass policy agreed with
+the user, the PM stops and reports. Code remains uncommitted. PM
+independent validation on the real machine after the corrections pass:
+fast suite 358 passed, risk 189 passed, ruff, mypy, registry audit, git
+diff --check clean; module budgets and inward dependency direction
+verified; task-001 test inventory fully preserved.
+
+PM assessment: the decomposition goal (AC4, AC5) is achieved and
+verified. The remaining High is a single enumerated fix in
+`src/risk/persistence.py` (require a persisted day for any checkpoint
+whose ledger is already reconciled; null day only for bootstrap) plus one
+regression test. The Low is an artifact rewrite. One targeted pass is the
+recommended next step if the user agrees.

@@ -43,3 +43,15 @@ Date: 2026-09-05
 - Recommended path recorded in approval.md: bounded follow-up task
   `risk-ledger-accounting-002` including an aggregator decomposition
   plan.
+
+## Task 002 status (2026-09-06)
+
+- 002 plan approved (PM and user). Implementation done: Part A fixes plus
+  decomposition into config/observations/accounting/persistence/
+  publication with aggregator.py as a 553-line facade; tests split along
+  the same lines. Fast suite 358, risk 189, all budgets and inward
+  dependencies verified by the PM.
+- Review 1: CHANGES_REQUIRED (Medium x2, Low). Corrections pass K1-K3
+  done. Review 2: CHANGES_REQUIRED (High null-day checkpoint bypass, Low
+  artifact). Stopped per the one-pass policy; awaiting user decision.
+- Working tree still holds all 001+002 code uncommitted.
