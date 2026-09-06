@@ -127,3 +127,65 @@ APPROVED; change surface limited to `tests/test_risk/test_persistence.py`
 and the implementation result; strong tier at `xhigh`; a fourth fresh
 full-scope review at `xhigh` follows. On APPROVE the PM proceeds to
 acceptance and commit; otherwise the PM reports and stops.
+
+## Acceptance (2026-09-06)
+
+Decision: ACCEPTED.
+
+Fourth review (runner-tracked, finished 12:11:10 UTC; a first attempt
+failed on a Codex-side "model at capacity" error and was retried):
+CHANGES_REQUIRED with a single Low finding, the implementation-result
+artifact format (M2), and no High or Medium runtime finding. AC1-AC6 are
+assessed satisfied by the reviewer within its read-only limits; the
+full-suite execution the reviewer could not run is reproduced by the PM
+below. The Low finding is non-blocking and is resolved here by PM-supplied
+evidence; it is recorded as a process defect, not a code defect.
+
+PM independent verification on the real machine after the final
+test-only pass:
+
+- `uv run --extra dev pytest -m "not integration and not slow"`: 372 passed
+  (task-001 close 332; original baseline 215)
+- `uv run --extra dev pytest tests/test_risk/`: 203 passed
+- ruff: All checks passed; mypy: no issues in 19 source files; registry
+  audit: ok; `python -m src.risk.aggregator --help`: exit 0;
+  `git diff --check`: clean (run last)
+- Module sizes: aggregator 553, config 216, observations 758,
+  accounting 390, persistence 897, publication 336, ledger 757; no
+  extracted module imports `aggregator.py`
+- Final pass changed only `tests/test_risk/test_persistence.py` (mtime
+  check against phase start); no runtime source changed after review 3
+- All 70 task-001 inventory tests present except the three intentionally
+  replaced in 001; no forbidden path touched; no `review.md` written by
+  any implement phase in this task
+
+AC-to-test map (PM-verified by name in `tests/test_risk/`):
+
+- AC1: test_checkpoint_pnl_inconsistent_with_ledger_is_rejected,
+  test_checkpoint_cap_flags_inconsistent_with_pnl_are_rejected,
+  test_checkpoint_save_load_roundtrip,
+  test_ledger_metadata_snapshot_binds_cursor_generation_and_as_of,
+  test_checkpoint_exposure_invariant_is_exact_at_high_precision,
+  test_checkpoint_net_exceeding_gross_is_rejected_without_rounding,
+  test_null_day_checkpoint_with_reconciled_ledger_is_rejected,
+  test_null_day_checkpoint_is_accepted_only_for_bootstrap
+- AC2: test_adapter_load_failure_publishes_fail_closed_state,
+  test_registry_failure_publishes_fail_closed_state
+- AC3: test_malformed_log_warning_includes_offset
+- AC4: test_aggregator_module_boundaries_are_bounded_and_inward,
+  test_aggregator_public_reexports_remain_available
+- AC5: full inventory in `test-evidence.md`; PM count check above
+- AC6: PM command results above
+- AC7: test_adr_005_documents_aggregator_module_map; implementation
+  artifact requirement NOT met by Codex, superseded by this note
+
+Accepted residual risks (recorded for follow-up tasks): no real venue
+adapter; exposure at entry price rather than mark; host-local cooperative
+writer lock (Windows backend tested via mocks only); unbounded ledger
+retention; single account scope and quote currency; shared-account cash
+allocation undefined; `persistence.py` at 897 of 900 lines.
+
+Process defects recorded: Codex never produced the required evidence
+table in the implementation result across both tasks; the PM generated
+`test-evidence.md` and this map instead. Runner hardening (phase-owned
+output paths, artifact format validation) remains backlog.

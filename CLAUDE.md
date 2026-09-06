@@ -132,9 +132,14 @@ Current safeguards to preserve:
 - Per-strategy config, state, logs, and reports.
 - Lifecycle: `draft -> testnet -> live -> deprecated -> retired`, with no backward transitions.
 - Live promotion requires testnet evidence, configured per-strategy risk limits, stop loss, kill switch test, and notification smoke test.
-- `src/orchestrator/registry.py` and `src/risk/aggregator.py` are implemented runtime code with tests; do not change them unless necessary for validation or tooling.
+- `src/orchestrator/registry.py` and the `src/risk/` package (`aggregator.py` facade plus `config`, `observations`, `accounting`, `persistence`, `publication`, `ledger`) are implemented runtime code with tests; do not change them unless a task explicitly requires it.
 
 Decisions 2026-08-22:
 
 - PM artifacts (`.claude/tasks/`, `.claude/checkpoints/`, `.claude/plans/`) are git-tracked as the acceptance audit trail; `codex-events.jsonl` stays local. `.claude/state/` and `.claude/logs/` remain gitignored by design (live-trading acks must not propagate).
 - `scripts/update.py` is the single template-updater implementation (fail-closed markers, byte-preserving Zone B/C, file-level `.codex` overlay, preserve-local DESIGN.md, self-update of scripts, validator, and updater test); `scripts/update.sh` is a thin wrapper. All downstream repos are bootstrapped onto `abd5beb`; future syncs are a single updater run.
+
+Decisions 2026-09-06:
+
+- Risk accounting is venue-authoritative: a SQLite fill ledger (`data/aggregator/{risk_group}/ledger.sqlite3`) drives realized PnL, venue observations drive unrealized PnL and exposure, bot logs are telemetry only. Checkpoints are semantically validated against the bound ledger; all fail-closed paths publish state schema v2 with per-metric provenance. See ADR-005 and tasks `risk-ledger-accounting-001/002`.
+- Follow-ups recorded in the 002 acceptance note: real venue adapter, mark-price exposure, ledger retention, multi-currency, shared-account cash allocation.

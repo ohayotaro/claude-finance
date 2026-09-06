@@ -1,0 +1,24 @@
+# Example cross-strategy risk group. Replace these identifiers with registered
+# local values before configuring an authoritative venue adapter.
+[risk_groups.example-main]
+account_scope = "example-main"
+quote_currency = "USD"
+poll_interval_s = 60.0
+soft_cap_daily_loss_pct = 3.0
+hard_cap_daily_loss_pct = 5.0
+margin_emergency_threshold = 0.95
+fail_closed_after_consecutive_failures = 5
+malformed_log_quarantine_per_minute = 100
+health_window_s = 120.0
+# Venue adapter timestamps may be at most this many seconds ahead of the
+# aggregator's post-fetch UTC clock. Larger skew fails reconciliation closed.
+future_skew_tolerance_s = 2.0
+# A position data cut may trail the ledger completeness watermark by at most
+# this many seconds. A position observation newer than the ledger watermark is
+# rejected at any skew unless its adapter supplies as_of_cut exactly equal to
+# that watermark. When omitted, this defaults to poll_interval_s.
+# accounting_cut_max_skew_s = 60.0
+
+# A real adapter must live under the approved src.risk namespace and implement
+# the complete VenueClient protocol, including gap-free ledger batches.
+# venue_client = "src.risk.venues.example:ExampleVenueClient"

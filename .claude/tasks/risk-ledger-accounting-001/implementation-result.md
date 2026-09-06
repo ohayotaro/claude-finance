@@ -2,67 +2,70 @@ Status: PASS
 
 ## Summary
 
-venue-authoritative risk accounting was implemented. Realized PnL now comes from an idempotent SQLite fill ledger; venue snapshots exclusively determine unrealized PnL, exposure, margin, drawdown, and position/order counts. Logs are telemetry only.
+Implemented the approved task through J1-J2. Position snapshots newer than the ledger watermark now fail closed unless the adapter explicitly supplies a historical `as_of_cut` equal to that watermark. Cached caps, PnL, and residual strategies are preserved, and unrealized-PnL provenance retains the true observation timestamp.
 
-Fast-suite results increased from 215 to 239 passing tests.
+No network, trading, credentials, commits, pushes, deployments, or destructive Git operations were used.
 
 ## Files changed
 
-- [ledger.py](/Users/ohayotaro/claude-finance/src/risk/ledger.py)
-- [aggregator.py](/Users/ohayotaro/claude-finance/src/risk/aggregator.py)
-- [test_ledger.py](/Users/ohayotaro/claude-finance/tests/test_risk/test_ledger.py)
-- [test_aggregator.py](/Users/ohayotaro/claude-finance/tests/test_risk/test_aggregator.py)
-- [risk_groups.toml](/Users/ohayotaro/claude-finance/config/risk_groups.toml)
-- [DESIGN.md](/Users/ohayotaro/claude-finance/.claude/docs/DESIGN.md)
+- [aggregator.py](/Users/ohayotaro/claude-finance/src/risk/aggregator.py:157)
+- [ledger.py](/Users/ohayotaro/claude-finance/src/risk/ledger.py:1)
+- [test_aggregator.py](/Users/ohayotaro/claude-finance/tests/test_risk/test_aggregator.py:3293)
+- [test_ledger.py](/Users/ohayotaro/claude-finance/tests/test_risk/test_ledger.py:76)
+- [risk_groups.toml](/Users/ohayotaro/claude-finance/config/risk_groups.toml:16)
+- [DESIGN.md](/Users/ohayotaro/claude-finance/.claude/docs/DESIGN.md:49)
+- [test-evidence.md](/Users/ohayotaro/claude-finance/.claude/tasks/risk-ledger-accounting-001/test-evidence.md)
 - [implementation-result.md](/Users/ohayotaro/claude-finance/.claude/tasks/risk-ledger-accounting-001/implementation-result.md)
 
-The unrelated pre-existing `state.json` modification was preserved.
+Pre-existing `state.json`, stderr, and review artifacts were preserved. `review.md` was not written.
 
-## Material decisions
+## Material design decisions
 
-- SQLite inserts and venue-cursor advancement are one transaction.
-- Duplicate fills/cash events are idempotent; conflicting stable identities fail closed.
-- PnL uses venue gross realized PnL minus commission/fees plus explicit funding/borrow/cash PnL effects.
-- Disabled, deprecated, and retired strategies remain venue-monitored until authoritatively flat.
-- Checkpoint and state schemas were bumped to v2 with safe v1 migration.
-- Every enforcement metric publishes source, observation timestamp, and age.
-- Account-scope, quote-currency, identity, completeness, and schema violations fail closed immediately.
-- No venue adapter, network client, dependency, trading action, or Git mutation was introduced.
+- Unaligned positive position/ledger skew is rejected before ledger mutation.
+- `VenuePositionsObservation.as_of_cut` permits explicitly historical position views only when exactly bound to the ledger watermark.
+- Older position cuts remain bounded by `accounting_cut_max_skew_s`.
+- Unrealized metrics publish the actual position observation time; composite group PnL publishes the enforcement cut.
+- Venue/ledger authority, exact Decimal accounting, checkpoint binding, and fail-closed semantics remain intact.
 
 ## Validation
 
-All final commands ran with `UV_OFFLINE=1` and an isolated writable `UV_CACHE_DIR` because the sandbox rejects the default `~/.cache/uv`.
+All successful `uv` commands used `UV_OFFLINE=1`.
 
-- `uv run --extra dev pytest tests/test_risk/ -v`
-  - PASS: 70 passed.
-- `uv run --extra dev pytest -m "not integration and not slow"`
-  - PASS: 239 passed; baseline was 215 passed.
-- `uv run --extra dev ruff check src/ tests/ .claude/hooks/ .claude/scripts/`
-  - PASS.
-- `uv run --extra dev mypy src/ .claude/scripts/`
-  - PASS: 14 source files checked.
-- `uv run python -m src.orchestrator.registry audit`
-  - PASS: `audit: ok (0 strategies, 0 accounts)`.
+- Baseline fast suite: `330 passed in 6.56s`
+- J1 failing-first: `2 failed, 141 deselected in 0.15s`
+- J1 after fix: `2 passed, 141 deselected in 0.11s`
+- `UV_CACHE_DIR=/private/tmp/claude-finance-uv-cache UV_OFFLINE=1 uv run --extra dev pytest tests/test_risk/ -v`
+  - `163 passed in 0.65s`
+- `UV_CACHE_DIR=/private/tmp/claude-finance-uv-cache UV_OFFLINE=1 uv run --extra dev pytest -m "not integration and not slow"`
+  - `332 passed in 6.55s`
+- `UV_CACHE_DIR=/private/tmp/claude-finance-uv-cache UV_OFFLINE=1 uv run --extra dev ruff check src/ tests/ .claude/hooks/ .claude/scripts/`
+  - `All checks passed!`
+- `UV_CACHE_DIR=/private/tmp/claude-finance-uv-cache UV_OFFLINE=1 uv run --extra dev mypy src/ .claude/scripts/`
+  - `Success: no issues found in 14 source files`
+- `UV_CACHE_DIR=/private/tmp/claude-finance-uv-cache UV_OFFLINE=1 uv run python -m src.orchestrator.registry audit`
+  - `audit: ok (0 strategies, 0 accounts)`
 - `git diff --check`
-  - PASS.
+  - Exit `0`, no output; run last.
 
-Failing-test-first evidence and all 22 new test names are recorded in the implementation result.
+The unprefixed initial pytest attempt could not access the sandboxed default uv cache; the writable-cache offline rerun passed without downloading anything.
 
-## Acceptance criteria
+## Acceptance-criteria mapping
 
-- AC1: PASS — known-value net PnL, costs, funding, shuffled duplicate replay, and conflict rollback tested.
-- AC2: PASS — venue zero and position omission override/prune log telemetry.
-- AC3: PASS — disabled/deprecated/retired residual exposure and failed-cycle retention tested.
-- AC4: PASS — rotation, truncation, checkpoint restart, late historical fills, and UTC boundaries tested.
-- AC5: PASS — schema-v2 provenance, age, stale-source rejection, and NullVenue behavior tested.
-- AC6: PASS — example configuration loads and unsafe configurations are rejected.
-- AC7: PASS — all required tests, lint, typing, and registry audit pass.
-- AC8: PASS — ADR-005 documents the approved accounting model and ADR-004 exception.
+- AC1: PASS — ledger known-value, costs, replay, shuffle, identity, and exact-accumulation tests pass.
+- AC2: PASS — venue-zero/omission tests and both new J1 common-cut tests pass.
+- AC3: PASS — disabled, deprecated, retired, residual, and failed-cycle retention tests pass.
+- AC4: PASS — rotation, truncation, restart, late pre-checkpoint fill, UTC-day attribution, and checkpoint recovery tests pass.
+- AC5: PASS — metric metadata, stale/log-source consumer detection, recomputed freshness, and truthful J1 provenance tests pass.
+- AC6: PASS — the example configuration loads and all safety validations pass.
+- AC7: PASS — all required tests, lint, type checking, registry audit, and whitespace checks pass.
+- AC8: PASS — ADR-005 documents the accounting model and explicit ADR-004 exception.
 
-## Residual risks and blockers
+Exact AC-to-test-name mappings are in [implementation-result.md](/Users/ohayotaro/claude-finance/.claude/tasks/risk-ledger-accounting-001/implementation-result.md).
 
-- No real venue adapter exists, so venue-specific cursor and normalized realized-PnL behavior remains unvalidated.
-- Ledger retention and compaction remain deferred.
-- Multi-currency and cross-account conversion remain unsupported and fail closed.
-- Future adapters must implement the expanded ledger-batch protocol.
-- Independent T3 review and PM acceptance remain separate workflow steps; there is no implementation blocker.
+## Residual risks, debt, or blockers
+
+- No real venue adapter yet validates venue-specific completeness and normalized PnL.
+- Mark-price/current-notional exposure remains deferred.
+- Writer locking is host-local and cooperative.
+- Ledger compaction, currency conversion, and shared-account cash allocation remain deferred.
+- Implementation is complete; final acceptance still requires the scheduled ninth independent review.

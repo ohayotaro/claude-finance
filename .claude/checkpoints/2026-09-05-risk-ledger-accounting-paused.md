@@ -55,3 +55,11 @@ Date: 2026-09-05
   done. Review 2: CHANGES_REQUIRED (High null-day checkpoint bypass, Low
   artifact). Stopped per the one-pass policy; awaiting user decision.
 - Working tree still holds all 001+002 code uncommitted.
+
+## Acceptance (2026-09-06)
+
+- Task 002 ACCEPTED after the fourth review (single Low, artifact format).
+  Task 001 implementation is accepted transitively as the base of 002.
+- Committed as one feat commit with all task artifacts. Roadmap Steps 1-2
+  (risk accounting) are done; next roadmap step is 3 (versioned data,
+  experiment-manifest, and backtest-result schemas).
