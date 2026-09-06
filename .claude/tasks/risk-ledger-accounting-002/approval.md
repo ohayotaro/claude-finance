@@ -103,3 +103,19 @@ User decision: run the recommended targeted pass. Brief Addendum 2
 (L1-L2) APPROVED; strong tier at `xhigh`; a third fresh full-scope review
 at `xhigh` follows. If that review returns APPROVE, the PM proceeds to
 acceptance and commit; otherwise the PM reports and stops.
+
+## Pause after third review (2026-09-06)
+
+Third review (runner-tracked, finished 08:53:03 UTC) verdict:
+CHANGES_REQUIRED with no High or Critical: Medium, the cap-flag
+inconsistency regression (`test_checkpoint_cap_flags_inconsistent_with_pnl_are_rejected`)
+now rejects because its undated fixture trips the new L1 bootstrap guard,
+so it no longer proves semantic cap validation; Low, the implementation
+result again lacks the AC table, line counts, and contains a non-ASCII
+character. No runtime defect was identified. PM independent validation:
+fast 372 passed, risk 203 passed, ruff, mypy, registry audit, git diff
+--check clean, module budgets and inward dependencies verified.
+
+Status: NOT ACCEPTED pending user decision. The remaining gap is
+test-only (fixture must be a valid dated checkpoint restored successfully
+before each isolated cap tamper) plus the artifact rewrite.
