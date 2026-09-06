@@ -157,3 +157,27 @@ The implement phase must not write `review.md`.
   whose evidence cells contain only exact comma-separated test function
   names, and reference `test-evidence.md` for the inventory instead of
   linking to itself.
+
+## Addendum 2: Targeted corrections for second review findings (PM-approved, user-approved, 2026-09-06)
+
+The second fresh review (`review-2.md`, CHANGES_REQUIRED) left two
+findings. The user approved one targeted pass. Fix both; no other
+changes. The implement phase must not write `review.md`.
+
+- L1 (High, finding 1): In `src/risk/persistence.py`, a checkpoint whose
+  bound ledger is already reconciled (any row, non-initial generation, or
+  non-initial cursor) must have a persisted `current_utc_date`; a null
+  day is accepted only for valid bootstrap state (empty ledger at
+  generation zero with zero cached PnL and no cap flags). Violations are
+  corrupt checkpoints: fail-closed publication and non-zero startup exit.
+  Tests: `test_null_day_checkpoint_with_reconciled_ledger_is_rejected`
+  (the reviewer's scenario: restore `-600` loss with `hard_cap`, clear
+  day/PnL/caps, restart, one venue failure; published state must be
+  `healthy=false`, `fail_closed=true`) and
+  `test_null_day_checkpoint_is_accepted_only_for_bootstrap`.
+- L2 (Low, finding 2): Rewrite `implementation-result.md` in one
+  whole-file write, English, plain ASCII, containing: an AC table whose
+  evidence cells hold only exact comma-separated test function names
+  (AC1-AC7), the `wc -l` output for every `src/risk/*.py` module, the
+  exact validation commands with results, and a reference to
+  `test-evidence.md` for the inventory.

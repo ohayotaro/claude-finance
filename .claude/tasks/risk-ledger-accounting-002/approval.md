@@ -96,3 +96,10 @@ verified. The remaining High is a single enumerated fix in
 whose ledger is already reconciled; null day only for bootstrap) plus one
 regression test. The Low is an artifact rewrite. One targeted pass is the
 recommended next step if the user agrees.
+
+## Targeted corrections pass approval (2026-09-06)
+
+User decision: run the recommended targeted pass. Brief Addendum 2
+(L1-L2) APPROVED; strong tier at `xhigh`; a third fresh full-scope review
+at `xhigh` follows. If that review returns APPROVE, the PM proceeds to
+acceptance and commit; otherwise the PM reports and stops.
