@@ -119,3 +119,11 @@ fast 372 passed, risk 203 passed, ruff, mypy, registry audit, git diff
 Status: NOT ACCEPTED pending user decision. The remaining gap is
 test-only (fixture must be a valid dated checkpoint restored successfully
 before each isolated cap tamper) plus the artifact rewrite.
+
+## Test-only corrections pass approval (2026-09-06)
+
+User decision: one more test-only pass. Brief Addendum 3 (M1-M2)
+APPROVED; change surface limited to `tests/test_risk/test_persistence.py`
+and the implementation result; strong tier at `xhigh`; a fourth fresh
+full-scope review at `xhigh` follows. On APPROVE the PM proceeds to
+acceptance and commit; otherwise the PM reports and stops.

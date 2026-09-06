@@ -181,3 +181,27 @@ changes. The implement phase must not write `review.md`.
   (AC1-AC7), the `wc -l` output for every `src/risk/*.py` module, the
   exact validation commands with results, and a reference to
   `test-evidence.md` for the inventory.
+
+## Addendum 3: Test-only corrections for third review findings (PM-approved, user-approved, 2026-09-06)
+
+The third fresh review (`review-3.md`, CHANGES_REQUIRED, no High) left
+two findings. Fix both. Change surface is limited to
+`tests/test_risk/test_persistence.py` and the implementation result; no
+runtime source may change. The implement phase must not write `review.md`.
+
+- M1 (Medium, finding 1): Rebuild
+  `test_checkpoint_cap_flags_inconsistent_with_pnl_are_rejected` on a
+  valid, dated, ledger-consistent checkpoint. The test must first assert
+  that the untampered checkpoint restores successfully, then for each
+  parameter case tamper exactly one of `soft_cap`, `hard_cap`, or
+  `margin_emergency` so that rejection is attributable only to the cap
+  mismatch (assert on the specific rejection reason or log message).
+  Also apply the same valid-base-then-tamper structure to
+  `test_checkpoint_pnl_inconsistent_with_ledger_is_rejected` if it shares
+  the undated fixture.
+- M2 (Low, finding 2): Rewrite `implementation-result.md` in one
+  whole-file write, English, plain ASCII (verify with a non-ASCII grep
+  before finishing), containing an AC1-AC7 table whose evidence cells hold
+  only exact comma-separated test function names, the `wc -l` output for
+  every `src/risk/*.py`, the exact validation commands with results, and a
+  reference to `test-evidence.md` for the inventory.
