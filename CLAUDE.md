@@ -139,3 +139,7 @@ Decisions 2026-09-06:
 
 - Risk accounting is venue-authoritative: a SQLite fill ledger (`data/aggregator/{risk_group}/ledger.sqlite3`) drives realized PnL, venue observations drive unrealized PnL and exposure, bot logs are telemetry only. Checkpoints are semantically validated against the bound ledger; all fail-closed paths publish state schema v2 with per-metric provenance. See ADR-005 and tasks `risk-ledger-accounting-001/002`.
 - Follow-ups recorded in the 002 acceptance note: real venue adapter, mark-price exposure, ledger retention, multi-currency, shared-account cash allocation.
+
+Decisions 2026-09-29:
+
+- Operating model: Claude implements and validates; Codex is the fresh independent reviewer for T2/T3 (ADR-006, task `harness-convergence-001`). Only blocking findings stop acceptance, reviews go full then delta, and the third `CHANGES_REQUIRED` stops the loop for a user decision. The runner executes allowlisted Required Validation commands before each read-only review.
