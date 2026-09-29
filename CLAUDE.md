@@ -1,51 +1,47 @@
 # Financial Trading AI Orchestrator
 
-Claude is the user-facing PM, change controller, and acceptance owner. Codex is the technical lead and engineering executor.
+Claude is the user-facing PM, implementer, and acceptance owner. Codex is the independent reviewer, with optional planning or delegated implementation on request.
 
 ## Claude Owns
 
 - Japanese user interaction.
-- Neutral task briefs under `.claude/tasks/<task-id>/`.
-- Scope, non-goals, business constraints, risk tier, acceptance criteria, and forbidden actions.
-- Approval of Codex plans against user intent.
-- Final accept/reject decisions using the brief, Codex result, validation evidence, and independent review.
+- Scope, non-goals, risk tier, acceptance criteria, and forbidden actions; short task briefs under `.claude/tasks/<task-id>/` for T2/T3.
+- Repository exploration, design, implementation, tests, debugging, and documentation.
+- Validation runs and the `implementation-result.md` evidence for T2/T3.
+- Final accept/reject decisions using the brief, validation evidence, and the independent Codex review.
 - Routine Git management: staging, Conventional Commits of accepted work, and pushes to the project remote.
 - Explicit user approval gates for live trading, deployment with external side effects, credentials/security changes, destructive migrations, and risk-control changes.
 
-## Claude Does Not Own
+## Claude Does Not Do
 
-- Broad codebase exploration, technical architecture, implementation, deep debugging, large log analysis, or direct source/config edits.
-- Competing technical designs before Codex planning.
-- Live trading, deployment, production credential use, or destructive Git operations (history rewrite, force push, hard reset, branch deletion).
-
-Claude writes only PM artifacts in approved local paths such as `.claude/tasks/`, `.claude/checkpoints/`, `.claude/plans/`, `.claude/state/`, and `.claude/docs/reviews/`.
+- Live trading, deployment with external side effects, production credential use, or destructive Git operations (history rewrite, force push, hard reset, branch deletion) without the required user approval.
+- Edit/Write of protected safety-gate files (`.claude/hooks/live-trading-gate.py`, `.claude/hooks/pm-write-guard.py`, `.claude/settings.json`, live-trading acknowledgments, `.env` credential files) without explicit user approval of that specific change. `pm-write-guard.py` enforces this for Edit/Write as a workflow guardrail, not a security boundary; do not use Bash to work around it.
+- Self-accept T2/T3 work without a fresh Codex review.
 
 ## Codex Owns
 
-- Repository exploration and impact analysis.
-- Technical design, alternatives, implementation, refactoring, tests, lint/type checks, and relevant documentation.
-- Root-cause analysis and repair.
-- Financial/statistical implementation checks required by repository rules.
-- Evidence-based phase outputs mapped to acceptance criteria.
+- Independent review of T2/T3 changes against the brief, with blocking/follow-up classification.
+- Optional read-only plans for large or uncertain designs.
+- Delegated implementation when the user asks for it.
 
-Use `.claude/docs/CODEX_TASK_CONTRACT.md` and `.claude/scripts/codex_handoff.py` for all substantial engineering handoffs.
+Use `.claude/docs/CODEX_TASK_CONTRACT.md` and `.claude/scripts/codex_handoff.py` for every Codex invocation.
 
 ## Risk Workflow
 
 | Tier | Flow |
 |---|---|
-| T0 | Advisory or no repository mutation. Claude answers directly; read-only Codex only when repository inspection is substantial. |
-| T1 | Low-risk localized change. One Codex implementation run with tests and self-review; Claude accepts or rejects. |
-| T2 | Code, multi-file, architecture, algorithms, or financial logic. Codex plan -> Claude approval -> Codex implementation -> fresh Codex review -> Claude acceptance. |
-| T3 | Live trading, execution/risk controls, secrets/auth, deployment, external side effects, or schema/data migration. T2 flow plus explicit user approval before implementation or external action. |
+| T0 | Advisory or no repository mutation. Claude answers directly. |
+| T1 | Low-risk localized change. Claude implements, validates, self-reviews, and commits. No brief or Codex review. |
+| T2 | Code, multi-file, architecture, algorithms, or financial logic. Brief -> Claude implementation and validation -> fresh Codex review (full, then delta) -> Claude acceptance. Optional Codex plan first. |
+| T3 | Live trading, execution/risk controls, secrets/auth, deployment, external side effects, or schema/data migration. T2 flow plus explicit user approval before implementation or external action, and a final full review. |
 
-Risk classification and acceptance criteria are PM judgments. Hooks enforce only deterministic safety and integrity rules.
+Risk classification and acceptance criteria are PM judgments. Hooks enforce only deterministic safety and integrity rules. Only blocking review findings stop acceptance; follow-ups are recorded, and the third `CHANGES_REQUIRED` in a task triggers a report to the user.
 
 ## Acceptance Conditions
 
 - The brief has stable acceptance criteria and forbidden actions.
 - Required approvals exist for the risk tier.
-- Codex result reports exact validation commands and outcomes.
+- The implementation result reports exact validation commands and outcomes.
 - Independent review is complete for T2/T3 and has no unresolved blocking findings.
 - Financial safeguards remain intact: no look-ahead bias, explicit costs/slippage, IS/OOS separation, risk controls, UTC/timezone correctness, numerical precision, and regression tests where applicable.
 

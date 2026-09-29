@@ -24,4 +24,4 @@ EA work is T2 by default and T3 if it changes live execution/risk controls or de
 
 ## Delegation
 
-Create the task brief and run the T2 flow. Live account deployment requires T3 approval and remains manually gated.
+Create the task brief and run the T2 flow (Claude implements, Codex reviews). Live account deployment requires T3 approval and remains manually gated.

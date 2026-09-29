@@ -1,6 +1,6 @@
 ---
 name: strategy-design
-description: PM intake for strategy design briefs, registry planning, financial acceptance criteria, and Codex architecture.
+description: PM intake for strategy design briefs, registry planning, financial acceptance criteria, and Codex review.
 allowed-tools: "Bash(python3 *) Read Write Edit Glob Grep"
 ---
 
@@ -24,4 +24,4 @@ Strategy design is T2 by default. It is T3 if it changes live trading, execution
 
 ## Delegation
 
-Create the task brief and run `plan` before any implementation. Claude approves the Codex plan against user intent before implementation.
+Create the task brief. Claude drafts the design; run the optional Codex `plan` when the edge hypothesis or architecture is uncertain. Implementation follows the T2 flow (Claude implements, Codex reviews).

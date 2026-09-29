@@ -5,34 +5,34 @@
 This repository uses a two-provider architecture:
 
 ```text
-Claude Opus  -> PM, Japanese user interaction, neutral task brief, risk tier, approvals, acceptance
-Codex        -> technical lead, repository exploration, design, implementation, tests, independent review
+Claude Opus  -> PM, Japanese user interaction, risk tier, implementation, tests, Git, approvals, acceptance
+Codex        -> independent review; optional plan or delegated implementation on request
 ```
 
-Substantial work is represented by `.claude/tasks/<task-id>/brief.md` and executed through `.claude/scripts/codex_handoff.py`. Planning and review use read-only Codex invocations. Implementation uses workspace-write. The runner centralizes Codex flags, phase prompts, result artifacts, JSONL event logs, and Git metadata.
+T2/T3 work is represented by `.claude/tasks/<task-id>/brief.md`; Claude implements and validates, then requests a fresh Codex review through `.claude/scripts/codex_handoff.py`. Planning and review use read-only Codex invocations; delegated implementation uses workspace-write. The runner centralizes Codex flags, phase prompts, result artifacts, JSONL event logs, and Git metadata.
 
 ## Current Decisions
 
-### ADR-001: Claude PM + Codex Engineering
+### ADR-006: Claude Implementation + Codex Independent Review
 
-- **Status**: Accepted
-- **Decision**: Claude owns PM/change-control duties; Codex owns technical work.
-- **Rationale**: The previous orchestration split created duplicate ownership, high PM context consumption, and non-deterministic delegation. A neutral brief plus phase artifacts makes the handoff auditable and keeps technical decisions in the engineering context.
-- **Consequences**: Claude writes only approved local orchestration artifacts. Codex receives the brief, relevant rules, and phase prerequisites through the central runner.
+- **Status**: Accepted (2026-09-29), supersedes ADR-S4
+- **Decision**: Claude implements and validates changes directly. Codex is the fresh, ephemeral independent reviewer for T2/T3 work, and on request produces a read-only plan or a delegated implementation. Review findings carry severity, a `blocking`/`follow-up` disposition, and a `new`/`carried` origin; only blocking findings (Critical/High, AC violation, failing required validation, weakened financial safeguard) produce `CHANGES_REQUIRED`. Re-reviews use a PM-scoped `delta` scope; the third `CHANGES_REQUIRED` in a task stops the loop for a user decision. T3 delta reviews run at `high` effort; plan, delegated implementation, and full reviews stay at `xhigh`. `pm-write-guard.py` protects only safety-gate files and credentials.
+- **Rationale**: Under ADR-S4, `risk-ledger-accounting-001` ran nine full-scope `xhigh` review rounds without acceptance: binary verdicts let Low findings block, every fresh full-scope review surfaced new, narrower findings, briefs accumulated superseded addenda, and one-line documentation edits needed a Codex round trip. The brief-plan-approval-implement relay added latency without adding independence; the independent check that matters is the fresh review.
+- **Consequences**: Development speed is bounded by Claude implementation plus one review cycle. Independence is preserved by the fresh ephemeral reviewer. Safety gates (live-trading gate, settings deny list, forbidden flags, network fail-closed, T3 user approval) are unchanged. Engineering-level rules carry `paths:` frontmatter so they load for Claude only when matching files are in play.
 
 ### ADR-002: Risk-Tier Gates
 
 - **Status**: Accepted
-- **Decision**: Work is classified T0-T3. T2 requires plan, Claude approval, implementation, and fresh review. T3 adds explicit user approval before implementation or external action.
+- **Decision**: Work is classified T0-T3. T1 is implemented and self-reviewed by Claude. T2 requires a brief, Claude implementation and validation, and a fresh Codex review. T3 adds explicit user approval before implementation or external action and a final full review.
 - **Rationale**: Financial trading tasks have materially different risk profiles. Tiered gates prevent low-risk documentation work from carrying heavyweight process while keeping live trading, credentials, deployment, migrations, and risk controls fail-closed.
 - **Consequences**: Risk classification is a PM judgment, not a keyword route. Hooks only enforce deterministic constraints.
 
 ### ADR-003: Fresh Review Separation
 
 - **Status**: Accepted
-- **Decision**: Medium- and high-risk changes receive a fresh read-only Codex review that does not receive the implementation transcript.
+- **Decision**: T2 and T3 changes receive a fresh read-only Codex review that does not receive the implementation transcript.
 - **Rationale**: Independent review catches gaps hidden by implementation context and keeps acceptance evidence auditable.
-- **Consequences**: Review may read only the brief, approved plan, implementation result artifact, repository, and diff.
+- **Consequences**: Review may read only the brief, optional plan, implementation result artifact, delta review scope, repository, and diff.
 
 ### ADR-004: Multi-Strategy As First-Class Runtime
 
@@ -69,6 +69,12 @@ The dependency direction is `ledger.py` and `config.py` into `observations.py`, 
 
 ## Superseded History
 
+### ADR-S4: Claude PM + Codex Engineering (formerly ADR-001)
+
+- **Status**: Superseded by ADR-006 (2026-09-29)
+- **Former decision**: Claude owned PM/change-control duties and wrote only orchestration artifacts; Codex owned exploration, design, implementation, tests, and review through a plan -> approval -> implement -> review relay.
+- **Reason superseded**: The relay made development extremely slow (see ADR-006 rationale) without adding independence beyond the fresh review.
+
 ### ADR-S1: Three-Provider Orchestration
 
 - **Status**: Superseded
@@ -99,10 +105,10 @@ The dependency direction is `ledger.py` and `config.py` into `observations.py`, 
 
 ## Deterministic Hooks
 
-- `pm-write-guard.py`: blocks Claude source/config writes outside allowed PM artifact paths.
+- `pm-write-guard.py`: blocks Claude Edit/Write on safety-gate files and credentials without explicit user approval (workflow guardrail, not a security boundary).
 - `live-trading-gate.py`: blocks live-trading Bash commands unless kill switch is clear and a fresh acknowledgment exists.
 - `post-bash-dispatcher.py`: runs concise post-command detectors and telemetry.
-- `error-to-codex.py`: points failures to the canonical task/debug flow.
+- `error-to-codex.py`: adds a short debugging reminder on failing commands; validation and runner commands are exempt.
 - `post-backtest-analysis.py`: detects real backtest failures and metric threshold warnings.
 - `post-bot-execution.py`: detects bot execution and connectivity incidents.
 - `log-cli-tools.py`: logs minimal Codex metadata without raw prompts or command bodies.

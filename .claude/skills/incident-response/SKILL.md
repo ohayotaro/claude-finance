@@ -1,6 +1,6 @@
 ---
 name: incident-response
-description: PM workflow for trading incidents, emergency evidence capture, and Codex root-cause tasks.
+description: PM workflow for trading incidents, emergency evidence capture, root-cause fixes, and Codex review.
 allowed-tools: "Bash(python3 *) Read Write Edit Glob Grep"
 ---
 
@@ -24,4 +24,4 @@ Incident response is T3 when live trading, credentials, deployment, or external 
 
 ## Delegation
 
-Create a T3 task brief. Run `plan`, obtain Claude and explicit user approval for any implementation or external action, then run `implement` and `review`.
+Create a T3 task brief. Obtain explicit user approval for any implementation or external action; Claude implements the fix with a regression test, then runs the Codex review, finishing with a full review.

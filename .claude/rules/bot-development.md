@@ -1,3 +1,11 @@
+---
+paths:
+  - "src/bot/**"
+  - "src/data/**"
+  - "src/monitoring/**"
+  - "docker/**"
+---
+
 # Bot Development Rules
 
 ## Multi-Strategy Bot Pattern

@@ -3,8 +3,8 @@
 Financial-trading orchestration template with a two-provider operating model:
 
 ```text
-Claude Opus  -> PM, user interaction, task brief, approval gates, acceptance
-Codex        -> technical lead, repository exploration, design, implementation, tests, review
+Claude Opus  -> PM, user interaction, implementation, tests, Git, approval gates, acceptance
+Codex        -> independent review (optional plan or delegated implementation on request)
 ```
 
 The project is markets-agnostic: crypto, FX, futures, equities, and optional MQL5 EA generation. Financial safeguards such as no look-ahead bias, explicit transaction costs, IS/OOS separation, risk controls, live-trading gates, and multi-strategy registry isolation are preserved.
@@ -44,14 +44,14 @@ Inside Claude Code:
 /init-finance
 ```
 
-The wizard records project identity in `CLAUDE.md` Zone B. Substantial engineering tasks are converted into `.claude/tasks/<task-id>/brief.md` and delegated to Codex through `.claude/scripts/codex_handoff.py`.
+The wizard records project identity in `CLAUDE.md` Zone B. Claude implements changes directly; T2/T3 work gets a short `.claude/tasks/<task-id>/brief.md` and a fresh Codex review through `.claude/scripts/codex_handoff.py`.
 
 ## Prerequisites
 
 | Tool | Purpose |
 |---|---|
-| Claude Code | PM and user-facing controller |
-| Codex CLI | technical design, implementation, tests, review |
+| Claude Code | PM, implementer, and user-facing controller |
+| Codex CLI | independent review, optional planning |
 | Git | repository state and diffs |
 | Python 3.11+ | hooks, runner, tests |
 | uv | dependency and command runner |
@@ -81,27 +81,31 @@ uv run python -m src.orchestrator.registry audit
 
 ## Task Workflow
 
-All substantial work starts from a canonical task directory:
+T2/T3 work uses a canonical task directory (T0/T1 work needs none):
 
 ```text
 .claude/tasks/<task-id>/
-├── brief.md                  # Claude PM owns
-├── plan.md                   # Codex plan output
-├── approval.md               # Claude PM approval for T2/T3
-├── implementation-result.md  # Codex implementation output
-├── review.md                 # fresh Codex review output
-├── state.json                # phase lifecycle, model/effort, git metadata
+├── brief.md                  # current consolidated spec (Claude)
+├── plan.md                   # optional Codex plan output
+├── approval.md               # T3 user approval, superseded decisions
+├── implementation-result.md  # validation evidence (Claude)
+├── review-scope.md           # delta review scope (Claude)
+├── review-validation.md      # runner-executed validation evidence
+├── review.md                 # latest fresh Codex review; older rounds kept as review-<n>.md
+├── acceptance.md             # acceptance note and follow-ups (Claude)
+├── state.json                # phase lifecycle, review scope, model/effort, git metadata
 └── codex-events.jsonl        # local-only consolidated phase event log
 ```
 
 Task artifacts, `.claude/checkpoints/`, and `.claude/plans/` are tracked in Git for auditability. Only `.claude/tasks/*/codex-events.jsonl` remains ignored because it is a large machine replay log. These artifacts must never contain secrets.
 
-Run phases through the central runner:
+Run Codex through the central runner:
 
 ```bash
+uv run python .claude/scripts/codex_handoff.py review <task-id>
+uv run python .claude/scripts/codex_handoff.py review <task-id> --scope delta
 uv run python .claude/scripts/codex_handoff.py plan <task-id>
 uv run python .claude/scripts/codex_handoff.py implement <task-id>
-uv run python .claude/scripts/codex_handoff.py review <task-id>
 uv run python .claude/scripts/codex_handoff.py status <task-id>
 uv run python .claude/scripts/codex_handoff.py collect <task-id>
 uv run python .claude/scripts/codex_handoff.py cancel <task-id>
@@ -112,9 +116,11 @@ Risk tiers:
 | Tier | Flow |
 |---|---|
 | T0 | Advisory or no repository mutation. |
-| T1 | Low-risk localized change: one Codex implementation run with tests and self-review. |
-| T2 | Code, multi-file, architecture, algorithms, or financial logic: plan, approval, implementation, independent review. |
-| T3 | Live trading, execution/risk controls, secrets/auth, deployment, external effects, or migration: T2 plus explicit user approval before implementation or external action. |
+| T1 | Low-risk localized change: Claude implements, validates, self-reviews, commits. |
+| T2 | Code, multi-file, architecture, algorithms, or financial logic: brief, Claude implementation and validation, fresh Codex review (full, then delta), acceptance. Optional Codex plan. |
+| T3 | Live trading, execution/risk controls, secrets/auth, deployment, external effects, or migration: T2 plus explicit user approval before implementation or external action, and a final full review. |
+
+Only blocking review findings (Critical/High, AC violation, failing validation, weakened financial safeguard) stop acceptance; the third `CHANGES_REQUIRED` in a task triggers a report to the user.
 
 ## What Gets Copied
 
@@ -165,21 +171,21 @@ ML:          /data-pipeline -> /ml-pipeline -> /backtest
 Operations:  /incident-response, /checkpointing, /codex-task, /codex-review
 ```
 
-Skills are PM intake workflows. They gather domain inputs, add acceptance criteria and checklists to the canonical brief, invoke the central Codex runner, and perform acceptance. They do not own implementation.
+Skills are intake workflows. They gather domain inputs, set the risk tier, and add acceptance criteria and checklists to the brief; Claude then implements and requests the Codex review.
 
 ## Architecture
 
-Claude is intentionally not the engineering worker. It keeps the conversation with the user, classifies risk, creates neutral briefs, approves Codex plans, and accepts or rejects based on evidence.
+Claude keeps the conversation with the user, classifies risk, implements and validates changes, and accepts or rejects based on evidence. Codex supplies the independent check: a fresh, ephemeral reviewer that never sees the implementation transcript.
 
-Codex performs repository exploration, design, implementation, tests, debugging, and independent review. Planning and review run read-only. Implementation runs workspace-write. The runner tracks phase state in `state.json`, emits consolidated events to `codex-events.jsonl`, and supports lifecycle commands (status, collect, cancel). Plan runs foreground; implement and review run as background processes via Claude Code `run_in_background`.
+Planning and review run read-only; delegated implementation runs workspace-write. The runner tracks phase state in `state.json`, emits consolidated events to `codex-events.jsonl`, runs the brief's allowlisted validation commands before each review so the read-only reviewer sees runner-executed evidence, archives earlier reviews, and supports lifecycle commands (status, collect, cancel). Reviews run as background processes via Claude Code `run_in_background`.
 
-Model and reasoning effort are phase-aware with four-level precedence: CLI flag, phase-specific env var (`CODEX_PLAN_MODEL`, `CODEX_PLAN_EFFORT`, etc.), general env var (`CODEX_MODEL`, `CODEX_EFFORT`), or built-in defaults. T3 tasks fail-closed at `xhigh` effort minimum.
+Model and reasoning effort are phase-aware with four-level precedence: CLI flag, phase-specific env var (`CODEX_PLAN_MODEL`, `CODEX_PLAN_EFFORT`, etc.), general env var (`CODEX_MODEL`, `CODEX_EFFORT`), or built-in defaults. T3 phases fail closed below `xhigh`, except delta reviews, which fail closed below `high`.
 
 Hooks are deterministic only:
 
-- `pm-write-guard.py` blocks Claude source/config writes outside PM artifact paths.
+- `pm-write-guard.py` blocks Claude Edit/Write on safety-gate files (live-trading gate, the guard itself, `settings.json`, live-trading acknowledgments, `.env` credentials) unless the user explicitly approves the change.
 - `live-trading-gate.py` keeps live execution fail-closed without a fresh acknowledgment and enforces per-strategy KillSwitch (`data/KILL.{strategy_id}`).
-- `post-bash-dispatcher.py` runs concise Bash telemetry and error/backtest/bot incident detectors.
+- `post-bash-dispatcher.py` runs concise Bash telemetry and error/backtest/bot incident detectors (validation commands such as pytest/ruff/mypy are exempt from the error advisory).
 
 ## Updating The Template
 
@@ -240,7 +246,7 @@ Migrated away:
 
 ## Provenance
 
-Financial-trading specialization. Structural inspiration comes from multi-agent development templates and Claude Code rules-layout patterns, but this repository now uses a Claude PM plus Codex engineering architecture.
+Financial-trading specialization. Structural inspiration comes from multi-agent development templates and Claude Code rules-layout patterns, but this repository now uses Claude implementation plus fresh Codex review.
 
 ## License
 

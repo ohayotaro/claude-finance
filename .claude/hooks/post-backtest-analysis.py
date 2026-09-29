@@ -96,9 +96,8 @@ def handle(data: dict[str, Any]) -> str | None:
         failure_parts = [
             f"BACKTEST FAILED (exit_code={exit_code}). Recommended next steps:",
             "1. Inspect stderr/traceback before any further action.",
-            "2. Create a task brief with stderr and validation evidence, then run "
-            "`.claude/scripts/codex_handoff.py implement <task-id>` for a T1 fix or "
-            "the full plan/implement/review flow for T2/T3.",
+            "2. Fix the root cause with a regression test; for T2/T3 work, record the "
+            "failure evidence in the task brief before the Codex review.",
             "3. Do NOT proceed with strategy validation until the failure is resolved.",
         ]
         if stderr:
@@ -147,8 +146,8 @@ def handle(data: dict[str, Any]) -> str | None:
     suggestions = [
         "BACKTEST COMPLETED. Recommended next steps:",
         "1. Review performance metrics against risk-management.md thresholds",
-        "2. Capture metrics in the task brief and run the canonical Codex handoff "
-        "flow for statistical validation.",
+        "2. Capture metrics in the task brief and request a Codex review of the "
+        "statistical validation.",
         "3. Check for look-ahead bias in strategy code",
         "4. Run Out-of-Sample test if not done",
     ]

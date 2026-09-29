@@ -132,4 +132,4 @@ The orchestrator checks the following conditions on `/checkpointing` or session 
 
 **Problem**: Delegation becomes non-deterministic and hard to audit.
 
-**Action**: Convert the skill to a thin PM intake checklist that references the canonical task contract and central runner.
+**Action**: Convert the skill to a thin intake checklist that references the canonical task contract and central runner.

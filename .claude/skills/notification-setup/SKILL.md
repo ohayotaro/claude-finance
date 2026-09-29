@@ -23,4 +23,4 @@ Notification work is T2 for code/config changes and T3 when real external channe
 
 ## Delegation
 
-Create the task brief and use T2 or T3 based on external side effects.
+Create the task brief and use the T2 or T3 flow (Claude implements, Codex reviews) based on external side effects.

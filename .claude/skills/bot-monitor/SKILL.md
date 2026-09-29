@@ -23,4 +23,4 @@ Monitoring changes are T2 unless they change production alert routing or externa
 
 ## Delegation
 
-Create the brief and use the T2 flow. If alert provider credentials or live notification changes are required, obtain explicit user approval before implementation.
+Create the brief and use the T2 flow (Claude implements, Codex reviews). If alert provider credentials or live notification changes are required, obtain explicit user approval before implementation.

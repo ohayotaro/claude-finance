@@ -1,6 +1,6 @@
 ---
 name: backtest
-description: PM intake for strategy backtest work with financial validation criteria and Codex execution.
+description: PM intake for strategy backtest work with financial validation criteria and Codex review.
 allowed-tools: "Bash(python3 *) Read Write Edit Glob Grep"
 ---
 
@@ -26,4 +26,4 @@ Use `.claude/docs/CODEX_TASK_CONTRACT.md`. Backtest implementation, repair, metr
 
 ## Delegation
 
-Create `.claude/tasks/<task-id>/brief.md`, then run the T2 flow unless the work is read-only analysis. For live-promotion evidence, classify as T3 if it can change deployment or risk-control state.
+Create `.claude/tasks/<task-id>/brief.md`, then run the T2 flow (Claude implements, Codex reviews) unless the work is read-only analysis. For live-promotion evidence, classify as T3 if it can change deployment or risk-control state.

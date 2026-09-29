@@ -1,3 +1,13 @@
+---
+paths:
+  - "src/**"
+  - "tests/**"
+  - "scripts/**"
+  - "mql5/**"
+  - ".claude/hooks/**"
+  - ".claude/scripts/**"
+---
+
 # Coding Principles
 
 ## Python

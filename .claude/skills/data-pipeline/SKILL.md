@@ -24,4 +24,4 @@ Data pipeline work is T2 by default and T3 if it mutates production data stores,
 
 ## Delegation
 
-Create the task brief and run the T2 flow. Schema or destructive data migration requires T3 approval.
+Create the task brief and run the T2 flow (Claude implements, Codex reviews). Schema or destructive data migration requires T3 approval.

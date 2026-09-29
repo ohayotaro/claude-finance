@@ -1,3 +1,10 @@
+---
+paths:
+  - "src/monitoring/**"
+  - "src/bot/**"
+  - "src/risk/**"
+---
+
 # Monitoring Rules
 
 ## Structured Logging

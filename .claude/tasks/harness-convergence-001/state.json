@@ -1,0 +1,29 @@
+{
+  "exit_code": 0,
+  "finished_at": "2026-09-29T10:52:42.455471+00:00",
+  "git_after": {
+    "branch": "main",
+    "head": "4a5a7b5b6d1bec5ce5fb6b0698c9d9749ef915da",
+    "status": "M .claude/docs/CODEX_TASK_CONTRACT.md\n M .claude/docs/DESIGN.md\n M .claude/hooks/error-to-codex.py\n M .claude/hooks/pm-write-guard.py\n M .claude/hooks/post-backtest-analysis.py\n M .claude/rules/bot-development.md\n M .claude/rules/codex-delegation.md\n M .claude/rules/coding-principles.md\n M .claude/rules/deployment.md\n M .claude/rules/document-lifecycle.md\n M .claude/rules/monitoring.md\n M .claude/rules/testing.md\n M .claude/scripts/codex_handoff.py\n M .claude/skills/backtest/SKILL.md\n M .claude/skills/bot-deploy/SKILL.md\n M .claude/skills/bot-develop/SKILL.md\n M .claude/skills/bot-monitor/SKILL.md\n M .claude/skills/checkpointing/SKILL.md\n M .claude/skills/codex-review/SKILL.md\n M .claude/skills/codex-task/SKILL.md\n M .claude/skills/data-pipeline/SKILL.md\n M .claude/skills/ea-generate/SKILL.md\n M .claude/skills/incident-response/SKILL.md\n M .claude/skills/init-finance/SKILL.md\n M .claude/skills/ml-pipeline/SKILL.md\n M .claude/skills/notification-setup/SKILL.md\n M .claude/skills/optimize/SKILL.md\n M .claude/skills/strategy-design/SKILL.md\n M .claude/skills/strategy-register/SKILL.md\n M AGENTS.md\n M CLAUDE.md\n M README.md\n A tests/test_hooks/test_error_to_codex.py\n M tests/test_orchestration/test_codex_handoff.py\n M tests/test_orchestration/test_pm_write_guard.py\n?? .claude/tasks/harness-convergence-001/"
+  },
+  "git_before": {
+    "branch": "main",
+    "head": "4a5a7b5b6d1bec5ce5fb6b0698c9d9749ef915da",
+    "status": "M .claude/docs/CODEX_TASK_CONTRACT.md\n M .claude/docs/DESIGN.md\n M .claude/hooks/error-to-codex.py\n M .claude/hooks/pm-write-guard.py\n M .claude/hooks/post-backtest-analysis.py\n M .claude/rules/bot-development.md\n M .claude/rules/codex-delegation.md\n M .claude/rules/coding-principles.md\n M .claude/rules/deployment.md\n M .claude/rules/document-lifecycle.md\n M .claude/rules/monitoring.md\n M .claude/rules/testing.md\n M .claude/scripts/codex_handoff.py\n M .claude/skills/backtest/SKILL.md\n M .claude/skills/bot-deploy/SKILL.md\n M .claude/skills/bot-develop/SKILL.md\n M .claude/skills/bot-monitor/SKILL.md\n M .claude/skills/checkpointing/SKILL.md\n M .claude/skills/codex-review/SKILL.md\n M .claude/skills/codex-task/SKILL.md\n M .claude/skills/data-pipeline/SKILL.md\n M .claude/skills/ea-generate/SKILL.md\n M .claude/skills/incident-response/SKILL.md\n M .claude/skills/init-finance/SKILL.md\n M .claude/skills/ml-pipeline/SKILL.md\n M .claude/skills/notification-setup/SKILL.md\n M .claude/skills/optimize/SKILL.md\n M .claude/skills/strategy-design/SKILL.md\n M .claude/skills/strategy-register/SKILL.md\n M AGENTS.md\n M CLAUDE.md\n M README.md\n A tests/test_hooks/test_error_to_codex.py\n M tests/test_orchestration/test_codex_handoff.py\n M tests/test_orchestration/test_pm_write_guard.py\n?? .claude/tasks/harness-convergence-001/"
+  },
+  "phase": "review",
+  "pid": 40248,
+  "requested_effort": "high",
+  "requested_model": null,
+  "resolved_effort": "high",
+  "resolved_model": null,
+  "result_path": ".claude/tasks/harness-convergence-001/review.md",
+  "review_scope": "delta",
+  "selection_source": {
+    "effort": "default_matrix",
+    "model": "omitted"
+  },
+  "started_at": "2026-09-29T10:50:34.741567+00:00",
+  "status": "succeeded",
+  "task_id": "harness-convergence-001"
+}

@@ -1,10 +1,10 @@
 # Codex Contract
 
-You are the technical lead and implementation agent for this financial trading repository. Claude owns product management, user interaction, task briefs, approval gates, and final acceptance. Codex owns repository exploration, technical design, implementation, tests, and evidence.
+You are the independent reviewer for this financial trading repository. Claude owns user interaction, task briefs, implementation, tests, Git, and final acceptance. Codex reviews Claude's changes against the brief, and on request produces a read-only plan or a delegated implementation.
 
 ## Required Inputs
 
-- Read `.claude/tasks/<task-id>/brief.md` before planning, implementing, or reviewing.
+- Read `.claude/tasks/<task-id>/brief.md` and `implementation-result.md` before reviewing; read the brief before planning or implementing.
 - Read only the domain rules relevant to the task from `.claude/rules/`.
 - For financial runtime work, prioritize `.claude/rules/financial-domain.md`, `risk-management.md`, `multi-strategy.md`, `security.md`, and `testing.md`.
 
@@ -41,7 +41,14 @@ Plan output must include recommended design and rationale, alternatives consider
 
 Implementation output must include status `PASS`, `PARTIAL`, or `BLOCKED`, summary, files changed, material decisions, exact validation commands and results, acceptance-criteria mapping, and residual risks or blockers.
 
-Review output must include verdict `APPROVE` or `CHANGES_REQUIRED`, findings by severity with file and line references where applicable, acceptance-criteria gaps, validation gaps, and residual financial, operational, security, or regression risks.
+Review rules (canonical text: `.claude/docs/CODEX_TASK_CONTRACT.md`, section Review):
+
+- Every finding has a severity (`Critical`, `High`, `Medium`, `Low`), a disposition (`blocking` or `follow-up`), and an origin (`new` or `carried`).
+- A finding is blocking if and only if it is Critical or High, directly violates a stated acceptance criterion, is a failing required validation command, or weakens a financial safeguard. Everything else is a follow-up.
+- Verdict is `CHANGES_REQUIRED` if and only if at least one blocking finding exists; otherwise `APPROVE`. Do not withhold `APPROVE` for follow-ups.
+- In a delta review, stay inside `review-scope.md` (listed findings plus regressions in touched files); report anything else only if it is blocking.
+- Claude stops the review loop after the third `CHANGES_REQUIRED` verdict in a task and escalates to the user. This process rule does not change how findings are classified.
+- Review output must include the verdict, blocking findings and follow-ups with file and line references, acceptance-criteria gaps, validation commands run with results, and residual financial, operational, security, or regression risks.
 
 ---
 

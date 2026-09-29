@@ -24,4 +24,4 @@ Financial ML implementation is T2 by default and T3 if it changes live inference
 
 ## Delegation
 
-Create the task brief and run the T2 flow. Live inference/deployment requires T3 approval.
+Create the task brief and run the T2 flow (Claude implements, Codex reviews). Live inference/deployment requires T3 approval.

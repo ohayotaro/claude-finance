@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Run isolated Codex handoff phases for Claude-managed tasks.
+"""Run isolated Codex phases for Claude-managed tasks.
 
-The runner is intentionally stdlib-only so hooks and skills can depend on it
-without adding runtime dependencies.
+Claude implements repository changes; Codex provides independent reviews and,
+optionally, plans or delegated implementations. The runner is intentionally
+stdlib-only so hooks and skills can depend on it without adding runtime
+dependencies.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -59,6 +62,78 @@ DEFAULT_EFFORT_BY_TIER = {
     "T2": "high",
     "T3": "xhigh",
 }
+REVIEW_SCOPES = ("full", "delta")
+REVIEW_SCOPE_NAME = "review-scope.md"
+T3_DELTA_REVIEW_EFFORT = "high"
+REVIEW_VALIDATION_NAME = "review-validation.md"
+VALIDATION_TIMEOUT_SECONDS = 900
+VALIDATION_OUTPUT_TAIL_CHARS = 4000
+FENCE_OPEN_RE = re.compile(r"^\s*(?P<ticks>`{3,}|~{3,})\s*(?P<lang>[\w+-]*)\s*$")
+HEADING_RE = re.compile(r"^\s{0,3}(?P<hashes>#{1,6})\s+(?P<title>.*?)\s*#*\s*$")
+VALIDATION_FENCE_LANGUAGES = frozenset({"bash", "sh"})
+UNFENCED_COMMAND_RE = re.compile(r"^(?:uv|git|pytest|ruff|mypy|python3?)\s")
+SHELL_METACHARACTERS = frozenset(";&|<>`$\n")
+# Defense in depth on top of the per-command argument allowlist: no live-trading
+# form or credential file reference may appear anywhere in a validation command.
+LIVE_TOKEN_RE = re.compile(
+    r"(?i)\bBOT_MODE\b|\bBOT_ENVIRONMENT\b|(?<![\w-])--live\b|--mode\b|--env-file\b|\.env\b"
+)
+POSITIONAL_ARG_RE = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_./:\[\]~^@=*-]*$")
+PYTEST_TB_STYLES = frozenset({"auto", "long", "short", "line", "native", "no"})
+
+
+@dataclass(frozen=True)
+class ValidationCommandSpec:
+    """Allowed shape of one runner-executed validation command."""
+
+    prefix: tuple[str, ...]
+    flags: frozenset[str] = frozenset()
+    value_flags: frozenset[str] = frozenset()
+    positionals: bool = True
+
+
+_PYTEST_FLAGS = frozenset({"-q", "-qq", "-v", "-vv", "-x", "--no-header", "--strict-markers"})
+_PYTEST_VALUE_FLAGS = frozenset({"-m", "-k", "--tb", "-p"})
+_RUFF_FLAGS = frozenset({"--no-cache", "--quiet", "-q", "--statistics"})
+_MYPY_FLAGS = frozenset({"--strict", "--no-incremental", "--pretty"})
+_GIT_DIFF_FLAGS = frozenset(
+    {
+        "--check",
+        "--stat",
+        "--name-only",
+        "--name-status",
+        "--cached",
+        "--staged",
+        "--exit-code",
+        "--",
+    }
+)
+_GIT_STATUS_FLAGS = frozenset({"--short", "-s", "--porcelain", "--branch", "-b", "--"})
+
+# Validation commands the runner may execute outside the Codex sandbox. Each
+# command must match a prefix and then use only the listed options and
+# repository-relative positional arguments. Commands run without a shell, so no
+# environment assignment, pipe, redirection, or chained command can reach them.
+VALIDATION_COMMAND_SPECS: tuple[ValidationCommandSpec, ...] = (
+    ValidationCommandSpec(
+        ("uv", "run", "--extra", "dev", "python", "-m", "pytest"),
+        _PYTEST_FLAGS,
+        _PYTEST_VALUE_FLAGS,
+    ),
+    ValidationCommandSpec(
+        ("uv", "run", "--extra", "dev", "pytest"), _PYTEST_FLAGS, _PYTEST_VALUE_FLAGS
+    ),
+    ValidationCommandSpec(("uv", "run", "pytest"), _PYTEST_FLAGS, _PYTEST_VALUE_FLAGS),
+    ValidationCommandSpec(("uv", "run", "--extra", "dev", "ruff", "check"), _RUFF_FLAGS),
+    ValidationCommandSpec(("uv", "run", "ruff", "check"), _RUFF_FLAGS),
+    ValidationCommandSpec(("uv", "run", "--extra", "dev", "mypy"), _MYPY_FLAGS),
+    ValidationCommandSpec(("uv", "run", "mypy"), _MYPY_FLAGS),
+    ValidationCommandSpec(
+        ("uv", "run", "python", "-m", "src.orchestrator.registry", "audit"), positionals=False
+    ),
+    ValidationCommandSpec(("git", "diff"), _GIT_DIFF_FLAGS),
+    ValidationCommandSpec(("git", "status"), _GIT_STATUS_FLAGS),
+)
 
 
 class HandoffError(RuntimeError):
@@ -238,6 +313,7 @@ def make_state(
     git_after: GitMetadata,
     result_path: str,
     selection: ModelEffortSelection | None = None,
+    review_scope: str | None = None,
 ) -> HandoffState:
     """Create a complete state object."""
 
@@ -252,6 +328,7 @@ def make_state(
         "git_before": git_before,
         "git_after": git_after,
         "result_path": result_path,
+        "review_scope": review_scope,
     }
     state.update(selection_state_fields(selection))
     return state
@@ -339,6 +416,19 @@ def validate_effort(effort: str, source: str) -> None:
         raise HandoffError(f"Invalid Codex effort from {source}: {effort!r}. Valid values: {valid}")
 
 
+def validate_review_scope(phase: str, review_scope: str | None) -> None:
+    """Reject review scopes on non-review phases and unknown scope values."""
+
+    if review_scope is None:
+        return
+    if phase != "review":
+        raise HandoffError(f"--scope applies only to the review phase, not {phase}")
+    if review_scope not in REVIEW_SCOPES:
+        raise HandoffError(
+            f"Invalid review scope: {review_scope!r}. Valid values: {', '.join(REVIEW_SCOPES)}"
+        )
+
+
 def phase_uses_read_only_sandbox(phase: str) -> bool:
     """Return whether a phase uses a read-only sandbox."""
 
@@ -351,8 +441,13 @@ def resolve_model_effort(
     cli_model: str | None,
     cli_effort: str | None,
     environ: Mapping[str, str],
+    review_scope: str | None = None,
 ) -> ModelEffortSelection:
-    """Resolve Codex model and reasoning effort for a phase."""
+    """Resolve Codex model and reasoning effort for a phase.
+
+    T3 phases require `xhigh` effort, except delta reviews, which require at
+    least `high`. A lower CLI effort is a deliberate operator override.
+    """
 
     if phase not in PHASES:
         raise HandoffError(f"Unsupported phase: {phase}")
@@ -360,6 +455,8 @@ def resolve_model_effort(
     tier = tier.upper()
     if tier not in DEFAULT_EFFORT_BY_TIER:
         raise HandoffError(f"Unsupported risk tier for Codex effort selection: {tier}")
+    validate_review_scope(phase, review_scope)
+    is_delta_review = phase == "review" and review_scope == "delta"
 
     model = non_empty(cli_model)
     model_source = "cli"
@@ -397,13 +494,17 @@ def resolve_model_effort(
                 effort_source = "general_env"
             else:
                 effort = DEFAULT_EFFORT_BY_TIER[tier]
+                if tier == "T3" and is_delta_review:
+                    effort = T3_DELTA_REVIEW_EFFORT
                 effort_source = "default_matrix"
 
     validate_effort(effort, effort_source)
 
-    if tier == "T3" and effort_source != "cli" and EFFORT_RANK[effort] < EFFORT_RANK["xhigh"]:
+    t3_floor = T3_DELTA_REVIEW_EFFORT if is_delta_review else "xhigh"
+    if tier == "T3" and effort_source != "cli" and EFFORT_RANK[effort] < EFFORT_RANK[t3_floor]:
         raise HandoffError(
-            "T3 tasks require xhigh Codex effort unless deliberately overridden by CLI"
+            f"T3 {phase} requires at least {t3_floor} Codex effort unless deliberately "
+            "overridden by CLI"
         )
 
     return ModelEffortSelection(
@@ -425,7 +526,12 @@ def ensure_no_network_requirement(brief: str) -> None:
         )
 
 
-def phase_prerequisites(phase: str, task_dir: Path, brief: str) -> dict[str, str]:
+def phase_prerequisites(
+    phase: str,
+    task_dir: Path,
+    brief: str,
+    review_scope: str | None = None,
+) -> dict[str, str]:
     """Load phase prerequisites and validate task state."""
 
     if phase == "plan":
@@ -447,10 +553,14 @@ def phase_prerequisites(phase: str, task_dir: Path, brief: str) -> dict[str, str
         return prerequisites
 
     if phase == "review":
-        prerequisites["Approved plan"] = read_required(task_dir / "plan.md")
+        plan_path = task_dir / "plan.md"
+        if plan_path.exists():
+            prerequisites["Plan"] = read_required(plan_path)
         prerequisites["Implementation result"] = read_required(
             task_dir / PHASES["implement"].output_name
         )
+        if review_scope == "delta":
+            prerequisites["Delta review scope"] = read_required(task_dir / REVIEW_SCOPE_NAME)
         return prerequisites
 
     raise HandoffError(f"Unsupported phase: {phase}")
@@ -476,6 +586,172 @@ def git_metadata(project_root: Path) -> GitMetadata:
         "branch": run_text_command(["git", "branch", "--show-current"], project_root),
         "status": run_text_command(["git", "status", "--short"], project_root),
     }
+
+
+def validation_fence_lines(brief: str) -> list[str]:
+    """Return the lines of every bash fence under a `## Required Validation` heading.
+
+    Headings inside fences are not section boundaries, fences may be indented,
+    and every Required Validation section is scanned so a duplicate heading
+    cannot hide a command. Unsupported formatting fails closed: a non-bash
+    fence, an unterminated fence, or a bare command line outside a fence.
+    """
+
+    in_section = False
+    fence_ticks: str | None = None
+    fence_in_section = False
+    lines: list[str] = []
+    for line in brief.splitlines():
+        stripped = line.strip()
+        if fence_ticks is not None:
+            if stripped and set(stripped) == {fence_ticks[0]} and len(stripped) >= len(fence_ticks):
+                fence_ticks = None
+            elif fence_in_section:
+                lines.append(stripped)
+            continue
+
+        opener = FENCE_OPEN_RE.match(line)
+        if opener is not None:
+            fence_ticks = opener.group("ticks")
+            fence_in_section = in_section
+            if in_section and opener.group("lang").casefold() not in VALIDATION_FENCE_LANGUAGES:
+                raise HandoffError(
+                    "Required Validation fences must be bash or sh: "
+                    f"{opener.group('lang') or '(no language)'}"
+                )
+            continue
+
+        heading = HEADING_RE.match(line)
+        if heading is not None and len(heading.group("hashes")) <= 2:
+            in_section = (
+                len(heading.group("hashes")) == 2
+                and heading.group("title").casefold() == "required validation"
+            )
+            continue
+
+        if in_section and UNFENCED_COMMAND_RE.match(stripped):
+            raise HandoffError(f"Validation command outside a bash fence: {stripped}")
+        if in_section and (stripped.startswith(">") or "```" in stripped or "~~~" in stripped):
+            raise HandoffError(
+                "Unsupported Required Validation formatting (blockquote or inline fence): "
+                f"{stripped}"
+            )
+
+    if fence_ticks is not None and fence_in_section:
+        raise HandoffError("Unterminated fence in Required Validation")
+    return lines
+
+
+def _validate_command_arguments(spec: ValidationCommandSpec, args: list[str], text: str) -> None:
+    """Reject any argument outside the spec's option allowlist or path shape."""
+
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in spec.flags:
+            index += 1
+            continue
+        flag, has_inline, inline_value = arg.partition("=")
+        if flag in spec.value_flags:
+            if has_inline and flag.startswith("--"):
+                value = inline_value
+                index += 1
+            elif not has_inline and index + 1 < len(args):
+                value = args[index + 1]
+                index += 2
+            else:
+                raise HandoffError(f"Validation option needs a value: {text}")
+            if flag == "--tb" and value not in PYTEST_TB_STYLES:
+                raise HandoffError(f"Validation option value is not allowed: {text}")
+            if flag == "-p" and not value.startswith("no:"):
+                raise HandoffError(f"Validation plugin option is not allowed: {text}")
+            continue
+        if arg.startswith("-") or not spec.positionals:
+            raise HandoffError(f"Validation argument is not allowlisted: {arg} in {text}")
+        if not POSITIONAL_ARG_RE.match(arg) or ".." in Path(arg).parts:
+            raise HandoffError(f"Validation path argument is not allowed: {arg} in {text}")
+        index += 1
+
+
+def required_validation_commands(brief: str) -> list[list[str]]:
+    """Return allowlisted commands from bash fences in the brief's Required Validation.
+
+    Raises HandoffError for any command outside the allowlist so an unexpected
+    command fails the review closed instead of being skipped silently.
+    """
+
+    commands: list[list[str]] = []
+    for text in validation_fence_lines(brief):
+        if not text or text.startswith("#"):
+            continue
+        if any(char in SHELL_METACHARACTERS for char in text):
+            raise HandoffError(f"Validation command uses shell syntax: {text}")
+        if LIVE_TOKEN_RE.search(text):
+            raise HandoffError(f"Validation command references live trading or credentials: {text}")
+        try:
+            tokens = shlex.split(text)
+        except ValueError as exc:
+            raise HandoffError(f"Validation command cannot be parsed: {text}") from exc
+        spec = next(
+            (
+                candidate
+                for candidate in VALIDATION_COMMAND_SPECS
+                if tuple(tokens[: len(candidate.prefix)]) == candidate.prefix
+            ),
+            None,
+        )
+        if spec is None:
+            raise HandoffError(f"Validation command is not allowlisted: {text}")
+        _validate_command_arguments(spec, tokens[len(spec.prefix) :], text)
+        commands.append(tokens)
+    return commands
+
+
+def run_validation_commands(commands: list[list[str]], project_root: Path) -> str:
+    """Run validation commands and return a Markdown evidence report."""
+
+    lines = [
+        "# Runner validation evidence",
+        "",
+        "Executed by `codex_handoff.py` before the review, outside the Codex sandbox.",
+        "",
+    ]
+    for tokens in commands:
+        display = shlex.join(tokens)
+        try:
+            result = subprocess.run(
+                tokens,
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=VALIDATION_TIMEOUT_SECONDS,
+            )
+            status = f"exit {result.returncode}"
+            output = (result.stdout + result.stderr).strip()
+        except subprocess.TimeoutExpired:
+            status = f"timeout after {VALIDATION_TIMEOUT_SECONDS}s"
+            output = ""
+        except OSError as exc:
+            status = f"failed to start: {exc}"
+            output = ""
+        tail = output[-VALIDATION_OUTPUT_TAIL_CHARS:]
+        lines.extend([f"## `{display}`", "", f"Result: {status}", "", "```text", tail, "```", ""])
+    return "\n".join(lines)
+
+
+def archive_previous_review(task_dir: Path) -> Path | None:
+    """Move an existing review.md to the next free review-<n>.md."""
+
+    current = phase_result_path("review", task_dir)
+    if not current.exists():
+        return None
+    index = 1
+    while (task_dir / f"review-{index}.md").exists():
+        index += 1
+    archived = task_dir / f"review-{index}.md"
+    current.rename(archived)
+    return archived
 
 
 def build_codex_command(
@@ -517,7 +793,8 @@ def build_codex_command(
 def prompt_for_phase(phase: str, brief: str, prerequisites: dict[str, str]) -> str:
     """Assemble a phase prompt for Codex."""
 
-    common = """You are Codex, the technical lead for this financial trading repository.
+    common = """You are Codex, working with Claude on this financial trading repository.
+Claude implements changes; you provide plans or independent reviews as requested.
 
 Read AGENTS.md and the relevant .claude/rules files before acting.
 Preserve unrelated dirty-worktree changes. Never revert user work.
@@ -552,18 +829,7 @@ Your output must include:
 - Residual risks, debt, or blockers
 """
     elif phase == "review":
-        contract = """Review the current repository and diff as a fresh independent reviewer.
-
-Do not rely on any implementation transcript. You may read only the brief, approved plan,
-implementation result artifact, repository, and diff available in this working tree.
-
-Your output must include:
-- Verdict: APPROVE or CHANGES_REQUIRED
-- Findings by severity with file and line references where applicable
-- Acceptance-criteria gaps
-- Validation gaps
-- Residual financial, operational, security, and regression risks
-"""
+        contract = REVIEW_CONTRACT
     else:
         raise HandoffError(f"Unsupported phase: {phase}")
 
@@ -571,6 +837,44 @@ Your output must include:
     for title, body in prerequisites.items():
         sections.append(f"## {title}\n\n{body.strip()}")
     return "\n\n".join(sections) + "\n"
+
+
+REVIEW_CONTRACT = """Review the current repository and diff as a fresh independent reviewer.
+
+Do not rely on any implementation transcript. You may read only the brief, plan (if any),
+implementation result artifact, delta review scope (if any), repository, and diff.
+Do not modify repository files. The sandbox is read-only, so commands that write caches or
+temp files may fail; the runner already executed the brief's Required Validation commands
+and includes their output as "Runner validation evidence" when present. Treat a failing
+runner validation command as a blocking finding.
+
+Classify every finding:
+- Severity: Critical, High, Medium, or Low.
+- Disposition: blocking or follow-up. A finding is blocking if and only if its severity
+  is Critical or High, or it directly violates a stated acceptance criterion, or a
+  required validation command fails, or it weakens a financial safeguard (look-ahead
+  bias, costs/slippage, IS/OOS separation, risk controls, UTC handling, numerical
+  precision). Everything else is follow-up.
+- Origin: new, or carried (restates a finding from the previous review round).
+
+Verdict: CHANGES_REQUIRED if and only if at least one blocking finding exists;
+otherwise APPROVE. Follow-ups never block.
+
+If a delta review scope is provided, review only the listed findings and regressions in
+the files touched by the corrections. Report anything outside that scope only if it is
+blocking.
+
+Process note: Claude stops the review loop after the third CHANGES_REQUIRED verdict in a
+task and escalates to the user. This does not change how you classify findings.
+
+Your output must include:
+- Verdict: APPROVE or CHANGES_REQUIRED
+- Blocking findings with severity, origin, and file and line references
+- Follow-ups with severity, origin, and file and line references
+- Acceptance-criteria gaps
+- Validation evidence reviewed (runner evidence and any read-only checks you ran)
+- Residual financial, operational, security, and regression risks
+"""
 
 
 def finish_phase_state(
@@ -584,6 +888,7 @@ def finish_phase_state(
     result_path: str,
     selection: ModelEffortSelection | None,
     error: str | None = None,
+    review_scope: str | None = None,
 ) -> None:
     """Write terminal phase state and append a finish marker."""
 
@@ -599,10 +904,11 @@ def finish_phase_state(
         git_after=git_after,
         result_path=result_path,
         selection=selection,
+        review_scope=review_scope,
     )
     write_state(task_dir, state)
 
-    marker_extra: HandoffState = {"result_path": result_path}
+    marker_extra: HandoffState = {"result_path": result_path, "review_scope": review_scope}
     if exit_code is not None:
         marker_extra["exit_code"] = exit_code
     if error is not None:
@@ -618,6 +924,7 @@ def start_phase_state(
     git_before: GitMetadata,
     result_path: str,
     selection: ModelEffortSelection,
+    review_scope: str | None = None,
 ) -> None:
     """Write running phase state and append a start marker."""
 
@@ -633,9 +940,14 @@ def start_phase_state(
         git_after={},
         result_path=result_path,
         selection=selection,
+        review_scope=review_scope,
     )
     write_state(task_dir, state)
-    marker_extra: HandoffState = {"pid": os.getpid(), "result_path": result_path}
+    marker_extra: HandoffState = {
+        "pid": os.getpid(),
+        "result_path": result_path,
+        "review_scope": review_scope,
+    }
     marker_extra.update(selection_state_fields(selection))
     append_event_marker(
         task_dir,
@@ -746,11 +1058,14 @@ def execute_phase(
     project_root: Path,
     cli_model: str | None = None,
     cli_effort: str | None = None,
+    review_scope: str | None = None,
 ) -> Path:
     """Run one Codex phase and return the output artifact path."""
 
     if phase not in PHASES:
         raise HandoffError(f"Unsupported phase: {phase}")
+    if phase == "review" and review_scope is None:
+        review_scope = "full"
 
     project_root = project_root.resolve()
     task_dir = resolve_task_dir(task_ref, project_root)
@@ -758,17 +1073,27 @@ def execute_phase(
     tier = risk_tier(brief)
     if tier is None:
         raise HandoffError("Brief must include a Risk Tier section before running Codex")
-    selection = resolve_model_effort(phase, tier, cli_model, cli_effort, os.environ)
+    selection = resolve_model_effort(
+        phase, tier, cli_model, cli_effort, os.environ, review_scope=review_scope
+    )
     output_path = phase_result_path(phase, task_dir)
     result_path = project_relative_path(output_path, project_root)
+    if phase == "review":
+        archive_previous_review(task_dir)
     started_at = utc_now()
     git_before = git_metadata(project_root)
 
-    start_phase_state(task_dir, phase, started_at, git_before, result_path, selection)
+    start_phase_state(task_dir, phase, started_at, git_before, result_path, selection, review_scope)
 
     try:
         ensure_no_network_requirement(brief)
-        prerequisites = phase_prerequisites(phase, task_dir, brief)
+        prerequisites = phase_prerequisites(phase, task_dir, brief, review_scope)
+        if phase == "review":
+            validation_commands = required_validation_commands(brief)
+            if validation_commands:
+                evidence = run_validation_commands(validation_commands, project_root)
+                (task_dir / REVIEW_VALIDATION_NAME).write_text(evidence, encoding="utf-8")
+                prerequisites["Runner validation evidence"] = evidence
         prompt = prompt_for_phase(phase, brief, prerequisites)
         command = build_codex_command(phase, project_root, output_path, selection)
     except HandoffError as exc:
@@ -784,6 +1109,7 @@ def execute_phase(
             result_path=result_path,
             selection=selection,
             error=str(exc),
+            review_scope=review_scope,
         )
         raise
 
@@ -810,6 +1136,7 @@ def execute_phase(
             result_path=result_path,
             selection=selection,
             error=error,
+            review_scope=review_scope,
         )
         raise HandoffError(error) from exc
 
@@ -835,6 +1162,7 @@ def execute_phase(
             result_path=result_path,
             selection=selection,
             error=error,
+            review_scope=review_scope,
         )
         raise HandoffError(error)
 
@@ -855,6 +1183,7 @@ def execute_phase(
             result_path=result_path,
             selection=selection,
             error=error,
+            review_scope=review_scope,
         )
         raise HandoffError(error)
 
@@ -868,6 +1197,7 @@ def execute_phase(
         git_after=git_after,
         result_path=result_path,
         selection=selection,
+        review_scope=review_scope,
     )
     return output_path
 
@@ -893,6 +1223,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help="Codex reasoning effort override for phase commands.",
     )
+    parser.add_argument(
+        "--scope",
+        default=None,
+        choices=REVIEW_SCOPES,
+        help="Review scope: full (default) or delta (requires review-scope.md).",
+    )
     return parser.parse_args(argv)
 
 
@@ -901,6 +1237,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
+        if args.scope is not None and args.command != "review":
+            raise HandoffError(f"--scope applies only to the review phase, not {args.command}")
         project_root = Path(args.project_root)
         if args.command == "status":
             output_path = print_status(args.task, project_root, sys.stdout)
@@ -915,6 +1253,7 @@ def main(argv: list[str] | None = None) -> int:
                 project_root,
                 cli_model=args.model,
                 cli_effort=args.effort,
+                review_scope=args.scope,
             )
     except HandoffError as exc:
         print(f"codex_handoff: {exc}", file=sys.stderr)

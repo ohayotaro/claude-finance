@@ -1,3 +1,9 @@
+---
+paths:
+  - "tests/**"
+  - "scripts/**"
+---
+
 # Testing Standards
 
 ## Test Categories

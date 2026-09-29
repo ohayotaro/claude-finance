@@ -1,3 +1,12 @@
+---
+paths:
+  - "docker/**"
+  - "**/Dockerfile"
+  - "**/docker-compose*.yml"
+  - "**/*.service"
+  - "**/*.plist"
+---
+
 # Deployment Rules
 
 ## Docker Best Practices

@@ -24,4 +24,4 @@ allowed-tools: "Bash(python3 *) Read Write Edit Glob Grep"
 
 ## Delegation
 
-For read-only `list`, `show`, or `audit`, Claude may run safe commands. For writes, create a task brief and use the T2/T3 flow. Live transition requires explicit user approval.
+For read-only `list`, `show`, or `audit`, Claude may run safe commands. For writes, create a task brief and use the T2/T3 flow (Claude implements, Codex reviews). Live transition requires explicit user approval.

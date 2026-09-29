@@ -25,4 +25,4 @@ Bot development is T2 by default and T3 if credentials, production endpoints, de
 
 ## Delegation
 
-Create the task brief and run the T2 flow. For production credentials or live-mode changes, upgrade to T3 and require explicit user approval before implementation.
+Create the task brief and run the T2 flow (Claude implements, Codex reviews). For production credentials or live-mode changes, upgrade to T3 and require explicit user approval before implementation.

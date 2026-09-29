@@ -23,4 +23,4 @@ Initialization is T1 for PM-only project identity updates and T2 when it scaffol
 
 ## Delegation
 
-For PM-only notes, write allowed orchestration artifacts. For repository changes, create a task brief and use `/codex-task`.
+Claude makes the changes directly. For T2 changes (scaffolding, hooks, CI), create a task brief and use `/codex-task` for the Codex review.

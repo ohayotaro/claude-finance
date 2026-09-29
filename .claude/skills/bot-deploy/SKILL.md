@@ -1,6 +1,6 @@
 ---
 name: bot-deploy
-description: PM intake for deployment work with live-trading gates, deployment evidence, and Codex execution.
+description: PM intake for deployment work with live-trading gates, deployment evidence, and Codex review.
 allowed-tools: "Bash(python3 *) Read Write Edit Glob Grep"
 ---
 
@@ -26,4 +26,4 @@ Deployment is T3 when it can affect live systems, credentials, infrastructure, e
 
 ## Delegation
 
-Create the task brief, run `plan`, obtain Claude and explicit user approval, then run `implement` and `review`. External deployment commands require a separate user gate after Codex produces the plan.
+Create the task brief and obtain explicit user approval before implementation. Claude implements, validates, and runs the Codex review; T3 finishes with a full review. External deployment commands require a separate user gate. Do not deploy directly from Claude.

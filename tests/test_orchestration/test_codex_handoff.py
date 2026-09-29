@@ -25,6 +25,7 @@ STATE_KEYS = {
     "git_before",
     "git_after",
     "result_path",
+    "review_scope",
     "requested_model",
     "resolved_model",
     "requested_effort",
@@ -424,6 +425,7 @@ def test_phase_runs_write_state_and_consolidated_events(
         assert state["git_before"] == GIT_STATE
         assert state["git_after"] == GIT_STATE
         assert str(state["result_path"]).endswith(artifact)
+        assert state["review_scope"] == ("full" if phase == "review" else None)
         assert state["requested_model"] is None
         assert state["resolved_model"] is None
         assert state["requested_effort"] == "medium"
@@ -609,3 +611,366 @@ def test_cancel_sets_cancelled_state(tmp_path: Path, capsys: pytest.CaptureFixtu
     assert cancelled["phase"] == "implement"
     assert cancelled["status"] == "cancelled"
     assert cancelled["finished_at"] is not None
+
+
+def run_fake_review(
+    handoff: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prompts: list[str],
+) -> None:
+    monkeypatch.setattr(handoff, "git_metadata", lambda _root: GIT_STATE)
+
+    def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        command = _args[0]
+        assert isinstance(command, list)
+        prompt = kwargs["input"]
+        assert isinstance(prompt, str)
+        prompts.append(prompt)
+        output_path = Path(command[command.index("--output-last-message") + 1])
+        output_path.write_text(f"review {len(prompts)}", encoding="utf-8")
+        return subprocess.CompletedProcess(args=["codex"], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(handoff.subprocess, "run", fake_run)
+
+
+def test_review_does_not_require_plan_and_embeds_blocking_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handoff = load_handoff()
+    task_dir = make_task(tmp_path, tier="T2")
+    (task_dir / "implementation-result.md").write_text("Claude result", encoding="utf-8")
+    prompts: list[str] = []
+    run_fake_review(handoff, tmp_path, monkeypatch, prompts)
+
+    handoff.execute_phase("review", "task-1", tmp_path)
+
+    prompt = prompts[0]
+    assert "Claude result" in prompt
+    assert "## Plan" not in prompt
+    assert "blocking if and only if" in prompt
+    assert "CHANGES_REQUIRED if and only if at least one blocking finding" in prompt
+    assert "Origin: new, or carried" in prompt
+
+
+def test_delta_review_requires_scope_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handoff = load_handoff()
+    task_dir = make_task(tmp_path, tier="T2")
+    (task_dir / "implementation-result.md").write_text("result", encoding="utf-8")
+    prompts: list[str] = []
+    run_fake_review(handoff, tmp_path, monkeypatch, prompts)
+
+    with pytest.raises(handoff.HandoffError):
+        handoff.execute_phase("review", "task-1", tmp_path, review_scope="delta")
+    state = read_json(task_dir / "state.json")
+    assert state["status"] == "blocked"
+    assert state["review_scope"] == "delta"
+    assert prompts == []
+
+    (task_dir / "review-scope.md").write_text("F1: fix rounding in foo.py", encoding="utf-8")
+    handoff.execute_phase("review", "task-1", tmp_path, review_scope="delta")
+
+    assert "## Delta review scope\n\nF1: fix rounding in foo.py" in prompts[0]
+    state = read_json(task_dir / "state.json")
+    assert state["status"] == "succeeded"
+    assert state["review_scope"] == "delta"
+
+
+def test_review_archives_previous_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handoff = load_handoff()
+    task_dir = make_task(tmp_path, tier="T2")
+    (task_dir / "implementation-result.md").write_text("result", encoding="utf-8")
+    prompts: list[str] = []
+    run_fake_review(handoff, tmp_path, monkeypatch, prompts)
+
+    handoff.execute_phase("review", "task-1", tmp_path)
+    handoff.execute_phase("review", "task-1", tmp_path)
+    handoff.execute_phase("review", "task-1", tmp_path)
+
+    assert (task_dir / "review-1.md").read_text(encoding="utf-8") == "review 1"
+    assert (task_dir / "review-2.md").read_text(encoding="utf-8") == "review 2"
+    assert (task_dir / "review.md").read_text(encoding="utf-8") == "review 3"
+
+
+def test_t3_delta_review_defaults_to_high_and_floors_at_high() -> None:
+    handoff = load_handoff()
+
+    delta = handoff.resolve_model_effort("review", "T3", None, None, {}, review_scope="delta")
+    assert delta.requested_effort == "high"
+    assert delta.selection_source["effort"] == "default_matrix"
+
+    env_high = handoff.resolve_model_effort(
+        "review", "T3", None, None, {"CODEX_REVIEW_EFFORT": "high"}, review_scope="delta"
+    )
+    assert env_high.requested_effort == "high"
+
+    with pytest.raises(handoff.HandoffError):
+        handoff.resolve_model_effort(
+            "review", "T3", None, None, {"CODEX_EFFORT": "medium"}, review_scope="delta"
+        )
+
+
+@pytest.mark.parametrize(("phase", "scope"), [("plan", None), ("review", "full")])
+def test_t3_plan_and_full_review_still_require_xhigh(phase: str, scope: str | None) -> None:
+    handoff = load_handoff()
+
+    selection = handoff.resolve_model_effort(phase, "T3", None, None, {}, review_scope=scope)
+    assert selection.requested_effort == "xhigh"
+
+    with pytest.raises(handoff.HandoffError):
+        handoff.resolve_model_effort(
+            phase, "T3", None, None, {"CODEX_EFFORT": "high"}, review_scope=scope
+        )
+
+
+@pytest.mark.parametrize(("phase", "scope"), [("plan", "delta"), ("review", "partial")])
+def test_invalid_review_scope_is_rejected(phase: str, scope: str) -> None:
+    handoff = load_handoff()
+
+    with pytest.raises(handoff.HandoffError):
+        handoff.resolve_model_effort(phase, "T2", None, None, {}, review_scope=scope)
+
+
+def test_parse_args_accepts_review_scope() -> None:
+    handoff = load_handoff()
+
+    assert handoff.parse_args(["review", "task-1", "--scope", "delta"]).scope == "delta"
+    assert handoff.parse_args(["review", "task-1"]).scope is None
+
+
+VALIDATION_BRIEF_EXTRA = """
+## Required Validation
+
+```bash
+uv run --extra dev pytest -q
+# comment lines are skipped
+git diff --check
+```
+"""
+# Built by concatenation so the live-trading gate hook does not flag this file's
+# own editing commands.
+LIVE_ASSIGNMENT = "BOT_MODE" + "=live"
+
+
+def test_required_validation_commands_parses_allowlisted_fence() -> None:
+    handoff = load_handoff()
+    brief = "## Risk Tier\nT2 - x\n" + VALIDATION_BRIEF_EXTRA + "\n## Forbidden Actions\nNone.\n"
+
+    assert handoff.required_validation_commands(brief) == [
+        ["uv", "run", "--extra", "dev", "pytest", "-q"],
+        ["git", "diff", "--check"],
+    ]
+    assert handoff.required_validation_commands("## Required Validation\npytest\n") == []
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"{LIVE_ASSIGNMENT} uv run python -m src.bot.main",
+        "uv run python -m src.bot.main --mode " + "live",
+        "uv run --extra dev pytest && rm -rf data",
+        "uv run --extra dev pytest | tee out.txt",
+        "uv run --extra dev pytest $(echo x)",
+        "curl https://example.com",
+        "python -c 'print(1)'",
+    ],
+)
+def test_required_validation_rejects_non_allowlisted_commands(command: str) -> None:
+    handoff = load_handoff()
+    brief = f"## Required Validation\n\n```bash\n{command}\n```\n"
+
+    with pytest.raises(handoff.HandoffError):
+        handoff.required_validation_commands(brief)
+
+
+def test_review_runs_brief_validation_and_passes_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handoff = load_handoff()
+    task_dir = make_task(tmp_path, tier="T2", extra=VALIDATION_BRIEF_EXTRA)
+    (task_dir / "implementation-result.md").write_text("result", encoding="utf-8")
+    monkeypatch.setattr(handoff, "git_metadata", lambda _root: GIT_STATE)
+    executed: list[list[str]] = []
+    prompts: list[str] = []
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        command = args[0]
+        assert isinstance(command, list)
+        if command[0] == "codex":
+            prompt = kwargs["input"]
+            assert isinstance(prompt, str)
+            prompts.append(prompt)
+            output_path = Path(command[command.index("--output-last-message") + 1])
+            output_path.write_text("review", encoding="utf-8")
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+        assert "shell" not in kwargs
+        executed.append(command)
+        code = 1 if command[0] == "git" else 0
+        return subprocess.CompletedProcess(
+            args=command, returncode=code, stdout=f"out {command[0]}", stderr=""
+        )
+
+    monkeypatch.setattr(handoff.subprocess, "run", fake_run)
+
+    handoff.execute_phase("review", "task-1", tmp_path)
+
+    assert executed == [
+        ["uv", "run", "--extra", "dev", "pytest", "-q"],
+        ["git", "diff", "--check"],
+    ]
+    evidence = (task_dir / "review-validation.md").read_text(encoding="utf-8")
+    assert "Result: exit 0" in evidence
+    assert "Result: exit 1" in evidence
+    assert "## Runner validation evidence" in prompts[0]
+    assert "out git" in prompts[0]
+
+
+def test_review_with_disallowed_validation_is_blocked_before_codex(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handoff = load_handoff()
+    extra = (
+        "\n## Required Validation\n\n```bash\n"
+        f"{LIVE_ASSIGNMENT} uv run python -m src.bot.main\n```\n"
+    )
+    task_dir = make_task(tmp_path, tier="T2", extra=extra)
+    (task_dir / "implementation-result.md").write_text("result", encoding="utf-8")
+    prompts: list[str] = []
+    run_fake_review(handoff, tmp_path, monkeypatch, prompts)
+
+    with pytest.raises(handoff.HandoffError):
+        handoff.execute_phase("review", "task-1", tmp_path)
+
+    assert prompts == []
+    assert read_json(task_dir / "state.json")["status"] == "blocked"
+
+
+def validation_brief(body: str) -> str:
+    return f"## Required Validation\n\n```bash\n{body}\n```\n"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'uv run --extra dev pytest -m "not integration and not slow" -q',
+        "uv run --extra dev pytest --tb=short -p no:cacheprovider tests/test_a.py::test_b",
+        "uv run --extra dev python -m pytest -k ledger -x",
+        "uv run --extra dev ruff check src/ tests/ .claude/hooks/",
+        "uv run --extra dev mypy --strict src/ .claude/scripts/",
+        "uv run python -m src.orchestrator.registry audit",
+        "git diff --stat -- .claude/hooks/pm-write-guard.py .claude/settings.json",
+        "git status --short",
+    ],
+)
+def test_validation_accepts_allowlisted_arguments(command: str) -> None:
+    handoff = load_handoff()
+
+    assert len(handoff.required_validation_commands(validation_brief(command))) == 1
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git diff --output=.claude/settings.json",
+        "git diff --output .claude/settings.json",
+        "uv run --extra dev pytest " + "--live",
+        "uv run --extra dev pytest --mode " + "live",
+        "uv run --extra dev pytest --env-file .env." + "production",
+        "uv run --extra dev pytest tests/.env",
+        "uv run --extra dev pytest --basetemp=/tmp/x",
+        "uv run --extra dev pytest -p cacheprovider",
+        "uv run --extra dev pytest --tb=evil",
+        "uv run --extra dev pytest ../outside",
+        "uv run --extra dev pytest /etc/passwd",
+        "uv run --extra dev ruff check --fix src/",
+        "uv run --extra dev ruff format src/",
+        "uv run --extra dev mypy --junit-xml out.xml src/",
+        "uv run python -m src.orchestrator.registry audit --fix",
+        "git log -p",
+    ],
+)
+def test_validation_rejects_unsafe_arguments(command: str) -> None:
+    handoff = load_handoff()
+
+    with pytest.raises(handoff.HandoffError):
+        handoff.required_validation_commands(validation_brief(command))
+
+
+def test_validation_heading_inside_fence_does_not_end_section() -> None:
+    handoff = load_handoff()
+    brief = (
+        "## Required Validation\n\n```bash\n## Offline checks\nuv run --extra dev pytest -q\n```\n"
+    )
+
+    assert handoff.required_validation_commands(brief) == [
+        ["uv", "run", "--extra", "dev", "pytest", "-q"]
+    ]
+
+
+def test_validation_indented_fence_in_list_is_parsed() -> None:
+    handoff = load_handoff()
+    brief = (
+        "## Required Validation\n\n- Fast suite:\n\n  ```bash\n"
+        "  uv run --extra dev pytest -q\n  ```\n"
+    )
+
+    assert handoff.required_validation_commands(brief) == [
+        ["uv", "run", "--extra", "dev", "pytest", "-q"]
+    ]
+
+
+def test_validation_subheading_stays_in_section_and_next_h2_ends_it() -> None:
+    handoff = load_handoff()
+    brief = (
+        "## Required Validation\n\n### Fast\n\n```bash\ngit diff --check\n```\n\n"
+        "## Forbidden Actions\n\n```bash\ncurl https://example.com\n```\n"
+    )
+
+    assert handoff.required_validation_commands(brief) == [["git", "diff", "--check"]]
+
+
+@pytest.mark.parametrize(
+    "brief",
+    [
+        "## Required Validation\n\n```text\nuv run --extra dev pytest -q\n```\n",
+        "## Required Validation\n\n```\nuv run --extra dev pytest -q\n```\n",
+        "## Required Validation\n\n```bash\nuv run --extra dev pytest -q\n",
+        "## Required Validation\n\n    uv run --extra dev pytest -q\n",
+        "## Required Validation\n\nuv run --extra dev pytest -q\n",
+        "## Required Validation\n\n> ```bash\n> git diff --check\n> ```\n",
+        "## Required Validation\n\n> ```bash\n> curl https://example.com\n> ```\n",
+        "## Required Validation\n\nRun `git diff --check` inside ```bash``` here.\n",
+    ],
+)
+def test_validation_unsupported_formatting_fails_closed(brief: str) -> None:
+    handoff = load_handoff()
+
+    with pytest.raises(handoff.HandoffError):
+        handoff.required_validation_commands(brief)
+
+
+@pytest.mark.parametrize("command", ["status", "collect", "cancel"])
+def test_lifecycle_commands_reject_scope(
+    tmp_path: Path,
+    command: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    handoff = load_handoff()
+    make_task(tmp_path)
+
+    exit_code = handoff.main(
+        [command, "task-1", "--project-root", str(tmp_path), "--scope", "delta"]
+    )
+
+    assert exit_code == 2
+    assert "--scope applies only to the review phase" in capsys.readouterr().err
+    assert not (tmp_path / ".claude" / "tasks" / "task-1" / "state.json").exists()

@@ -24,4 +24,4 @@ Optimization work is T2 because it changes or validates trading logic evidence.
 
 ## Delegation
 
-Create the task brief and run the T2 flow. Treat live-promotion decisions as T3.
+Create the task brief and run the T2 flow (Claude implements, Codex reviews). Treat live-promotion decisions as T3.
